@@ -1,62 +1,77 @@
-# Delta Lake Lab - Quickstart with Docker and SBT
+# Delta Lake Lab - Quickstart (Docker & Colab)
 
-This repository contains **Scala examples for working with Delta Lake**, including:
+- Table of Contents 
+  * [Environment Versions](#environment-versions)
+  * [Option 1: Run in Docker (Scala + SBT)](#option-1-run-in-docker-scala--sbt)
+    + [1. Start the Delta Docker container](#1-start-the-delta-docker-container)
+    + [2. Install SBT and utilities](#2-install-sbt-and-utilities)
+    + [3. Clone the lab repository](#3-clone-the-lab-repository)
+    + [4. Project structure](#4-project-structure)
+    + [5. Run the project](#5-run-the-project)
+  * [Option 2: Run in Google Colab (PySpark + Delta Lake)](#option-2-run-in-google-colab-pyspark--delta-lake)
+    + [1. Install dependencies](#1-install-dependencies)
+    + [2. Create a SparkSession configured for Delta](#2-create-a-sparksession-configured-for-delta)
+    + [3. Test Delta table features](#3-test-delta-table-features)
+  * [Notes](#notes)
 
-- Creating and managing Delta tables
-- Writing and overwriting data
-- Exploring Delta metadata, `_delta_log`, and table history
+This repository contains **Scala and PySpark examples for working with Delta Lake**, including:
 
-This guide explains how to run the lab inside a Docker container with SBT installed.
+* Creating and managing Delta tables
+* Writing and overwriting data
+* Exploring Delta metadata, `_delta_log`, and table history
+
+You can run the lab **either inside a Docker container using SBT (Scala)** or directly in **Google Colab (Python / PySpark)**.
 
 ## Environment Versions
 
-- Docker image: `deltaio/delta-docker:latest`
-- Scala: 2.13.16
-- SBT: 1.11.7
-- Spark: 4.0.0
-- Delta Lake: 4.0.0
+| Component    | Docker/SBT                    | Colab/PySpark |
+| ------------ | ----------------------------- | ------------- |
+| Scala        | 2.13.16                       | N/A           |
+| SBT          | 1.11.7                        | N/A           |
+| Spark        | 4.0.0                         | 3.5.1         |
+| Delta Lake   | 4.0.0                         | 3.2.0         |
+| Docker image | `deltaio/delta-docker:latest` | N/A           |
 
-## 1. Start the Delta Docker container
+## Option 1: Run in Docker (Scala + SBT)
 
-Run the following command to start a container:
+### 1. Start the Delta Docker container
 
 ```bash
 docker run --name delta-lake-lab --rm -it -p 4040:4040 -u root --entrypoint bash deltaio/delta-docker
-````
+```
 
 * `--rm` → automatically remove the container when stopped
 * `-p 4040:4040` → exposes Spark UI on port 4040
 * `-u root` → run as root to install packages
 * `--entrypoint bash` → opens a bash shell
 
-## 2. Install SBT and utilities
+### 2. Install SBT and utilities
 
-Inside the container, run the following commands:
+Inside the container:
 
 ```bash
 apt-get update
 apt-get install -y apt-transport-https curl jq
 
-# Adds the SBT repository key.
+# Add SBT repository key
 curl -sL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823" | apt-key add -
 
-# Adds the SBT repository. 
+# Add SBT repository
 echo "deb https://repo.scala-sbt.org/scalasbt/debian all main" | tee /etc/apt/sources.list.d/sbt.list
 
-# Update again and install SBT. 
+# Update and install SBT
 apt-get update
 apt-get install -y sbt
 ```
 
-
-## 3. Clone the lab repository
+### 3. Clone the lab repository
 
 ```bash
 git clone https://github.com/CynicDog/delta-lake-lab.git
 cd delta-lake-lab/delta-lake-lab
 ```
 
-## 4. Project structure
+### 4. Project structure
 
 ```
 delta-lake-lab/
@@ -70,16 +85,74 @@ delta-lake-lab/
 └── target/             # SBT build outputs (ignored in Git)
 ```
 
-## 5. Run the project
-
-From inside the container, run:
+### 5. Run the project
 
 ```bash
 sbt run
-````
-* SBT will compile your project and prompt you to select the main class. 
-* Enter the number corresponding to the app you wish to run. 
+```
 
-## 6. Notes
+* SBT will compile the project and prompt you to select the main class.
+* Enter the number corresponding to the app you wish to run.
+
+## Option 2: Run in Google Colab (PySpark + Delta Lake) 
+
+You can also run Delta Lake examples in **Python** directly in Colab.
+
+### 1. Install dependencies
+
+```python
+!pip uninstall -y pyspark delta-spark dataproc-spark-connect
+!pip install -q pyspark==3.5.1 delta-spark==3.2.0
+```
+
+### 2. Create a SparkSession configured for Delta
+
+```python
+from pyspark.sql import SparkSession
+from delta import configure_spark_with_delta_pip
+
+def get_spark():
+    builder = (
+        SparkSession.builder.appName("DeltaLakeApp")
+        .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+    )
+    return configure_spark_with_delta_pip(builder).getOrCreate()
+
+spark = get_spark()
+spark
+```
+
+### 3. Test Delta table features
+
+```python
+from delta.tables import DeltaTable
+data = [(1, "Alice", 100), (2, "Bob", 200), (3, "Charlie", 300)]
+df = spark.createDataFrame(data, ["id", "name", "amount"])
+
+# Write Delta table
+delta_path = "/tmp/delta-table"
+df.write.format("delta").mode("overwrite").save(delta_path)
+
+# Read Delta table
+delta_df = spark.read.format("delta").load(delta_path)
+delta_df.show()
+
+# Update
+delta_table = DeltaTable.forPath(spark, delta_path)
+delta_table.update(condition="name = 'Bob'", set={"amount": "250"})
+delta_table.toDF().show()
+
+# Delete
+delta_table.delete(condition="name = 'Alice'")
+delta_table.toDF().show()
+
+# Time travel
+old_version_df = spark.read.format("delta").option("versionAsOf", 0).load(delta_path)
+old_version_df.show()
+```
+
+## Notes
 
 * All directories generated by Spark or SBT (`target/`, `spark-warehouse/`, `project/`) are ignored in Git.
+* Docker is ideal for **Scala-focused exercises**; Colab is easier for **quick Python-based experiments**.
