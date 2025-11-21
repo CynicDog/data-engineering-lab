@@ -96,7 +96,9 @@ sbt run
 
 ## Option 2: Run in Google Colab (PySpark + Delta Lake) 
 
-You can also run Delta Lake examples in **Python** directly in Colab.
+You can also run Delta Lake examples in **Python** directly in Colab. <a href="https://colab.research.google.com/github/CynicDog/delta-lake-lab/blob/main/Delta_Lake_Colab.ipynb" target="_parent">
+  <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/>
+</a>
 
 ### 1. Install dependencies
 
