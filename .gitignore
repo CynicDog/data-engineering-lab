@@ -10,3 +10,6 @@ project/
 # Ignore OS-specific files
 .DS_Store
 
+# Ignore docker volumes and database data
+data-observability-stacks/docker-volume/
+**/db-data/
