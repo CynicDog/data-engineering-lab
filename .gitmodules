@@ -1,3 +1,0 @@
-[submodule "data-observability-stacks/marquez"]
-	path = data-observability-stacks/marquez
-	url = https://github.com/MarquezProject/marquez.git
