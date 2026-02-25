@@ -15,8 +15,8 @@ docker-compose up -d
 Enter the container and navigate to the project directory and : 
 
 ```bash
+docker exec -it spark_sdp /bin/bash
 cd /app/sdp
-docker exec -it spark-sdp /bin/bash
 ```
 
 ### 3. Run Pipeline
