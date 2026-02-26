@@ -5,6 +5,9 @@
 docker compose up 
 ```
 
+## Register Mysql database service 
+<img height="800" src="https://github.com/user-attachments/assets/6f752c4b-0478-4951-bf31-c73f0224a2ac" />
+
 ## Grant MySQL Log Access
 
 ```bash
