@@ -12,3 +12,21 @@ docker compose up
   
 </details>
 
+
+```bash 
+docker exec -it hive_server beeline -u jdbc:hive2://localhost:10000 -n hive -e "
+CREATE TABLE IF NOT EXISTS employee (
+    id INT,
+    name STRING,
+    role STRING,
+    updated_at TIMESTAMP
+)
+STORED AS ORC;
+
+INSERT INTO TABLE employee VALUES 
+(1, 'Eunsang', 'Data Engineer', CURRENT_TIMESTAMP()),
+(2, 'Alice', 'Data Scientist', CURRENT_TIMESTAMP()),
+(3, 'Bob', 'Platform Engineer', CURRENT_TIMESTAMP());
+"
+```
+
