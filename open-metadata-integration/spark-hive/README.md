@@ -4,9 +4,9 @@
 
 | Component                         | Description |
 |-----------------------------------|-------------|
-| **Metastore DB** (PostgreSQL)     | Stores table metadata (schemas, partitions, locations). No actual data files. |
-| **Hive Metastore Service** (9083) | Metadata API layer used by Spark, HiveServer2, and OpenMetadata. |
-| **HiveServer2** (10000 / 10002)   | SQL endpoint (JDBC/ODBC) for running Hive queries via Beeline or BI tools. |
+| **Metastore DB** (`5432`)     | Stores table metadata (schemas, partitions, locations). No actual data files. |
+| **Hive Metastore Service** (`9083`) | Metadata API layer used by Spark, HiveServer2, and OpenMetadata. |
+| **HiveServer2** (`10000`, `10002`)   | SQL endpoint (JDBC/ODBC) for running Hive queries via Beeline or BI tools. |
 
 ## Start Containers 
 ```bash
