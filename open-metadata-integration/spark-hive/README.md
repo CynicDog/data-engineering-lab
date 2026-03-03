@@ -23,7 +23,6 @@ docker exec -it metastore_db psql -U hive -d metastore_db -c "\dt"
 docker exec -it hive_server beeline -u jdbc:hive2://localhost:10000 -n hive -e "SHOW SCHEMAS;"
 ```
 
-
 ## Register Hive database service 
 <details><summary>Add Hive service</summary>
 
@@ -31,6 +30,13 @@ docker exec -it hive_server beeline -u jdbc:hive2://localhost:10000 -n hive -e "
   
 </details>
 
+## Add Lineage Agent and Trigger the Run 
+
+<details><summary>Add Lineage Agent</summary>
+
+  <img width="1660" height="1265" alt="image" src="https://github.com/user-attachments/assets/12086cd9-88b7-4dbc-b3b3-bad18acd7394" />
+  
+</details>
 
 ## Create a seed table 
 ```bash 
