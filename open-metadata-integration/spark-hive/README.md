@@ -77,3 +77,7 @@ Submit job:
   --jars /opt/spark/conf/extra-jars/openmetadata-spark-agent-1.1.jar,/opt/spark/conf/extra-jars/postgres-driver.jar \
   /app/employee.py
 ```
+
+<img width="1607" height="1444" alt="Screenshot 2026-03-03 at 3 17 23 PM" src="https://github.com/user-attachments/assets/182d3a84-7b6c-487f-816c-84cf946b6ee1" />
+
+
