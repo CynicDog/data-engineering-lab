@@ -59,4 +59,21 @@ WHERE \"TBL_NAME\" = 'employee';
 "
 ```
 
+## Run Spark Job
 
+Enter container:
+```bash
+docker exec -it spark_worker bash
+```
+
+Set JWT (Settings → Bots → Ingestion Bot) in the `spark_worker` container:
+```bash
+export SPARK_SUBMIT_OPTS="$SPARK_SUBMIT_OPTS -Dspark.openmetadata.transport.jwtToken=(YOUR_JWT_TOKEN)"
+```
+
+Submit job:
+```bash
+/opt/spark/bin/spark-submit \
+  --jars /opt/spark/conf/extra-jars/openmetadata-spark-agent-1.1.jar,/opt/spark/conf/extra-jars/postgres-driver.jar \
+  /app/employee.py
+```

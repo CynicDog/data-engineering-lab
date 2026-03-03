@@ -548,7 +548,6 @@ services:
       - ingestion-volume-dags:/opt/airflow/dags
       - ingestion-volume-tmp:/tmp
 
-  # Official Postgres Metastore DB
   metastore-db:
     image: postgres:15
     restart: unless-stopped
@@ -566,7 +565,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # Official Metastore Service
   hive-metastore:
     image: apache/hive:3.1.3
     depends_on:
@@ -591,11 +589,10 @@ services:
       - '9083:9083'
     volumes:
       - warehouse:/opt/hive/data/warehouse
-      - ./postgres-driver.jar:/opt/hive/lib/postgres.jar
+      - ./conf/postgres-driver.jar:/opt/hive/lib/postgres.jar
     networks:
       - app_net
 
-  # Official HiveServer2
   hive-server:
     image: apache/hive:3.1.3
     depends_on:
@@ -625,6 +622,28 @@ services:
     networks:
       - app_net
 
+  spark_worker:
+    image: apache/spark:3.5.0-python3
+    container_name: spark_worker
+    user: root
+    depends_on:
+      - openmetadata-server
+      - hive-server
+    ports:
+      - "4040:4040"
+    volumes:
+      - warehouse:/opt/hive/data/warehouse
+      - ./app:/app
+      - ./conf:/opt/spark/conf/extra-jars
+    networks:
+      - app_net
+    environment:
+      - SPARK_HOME=/opt/spark
+    command: >
+      bash -c "
+        echo 'Spark is ready. Waiting for jobs...'
+        tail -f /dev/null
+      "
 
 networks:
   app_net:
