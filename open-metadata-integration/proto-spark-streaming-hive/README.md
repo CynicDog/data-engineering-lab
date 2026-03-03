@@ -59,12 +59,6 @@ export PYTHONPATH=$PYTHONPATH:/opt/spark/work-dir/ingestion/src:/opt/spark/work-
   /opt/spark/work-dir/ingestion/src/main.py
 ```
 
-## Verify Hive service and fed data 
-```bash
-docker exec -it hive_server beeline -u jdbc:hive2://localhost:10000 -n hive -e "SHOW SCHEMAS;"
-docker exec -it hive_server beeline -u jdbc:hive2://localhost:10000 -n hive -p hive_password -e "SELECT * FROM default.mta_subway_status LIMIT 10;"
-```
-
 ## Register Hive database service 
 <details><summary>Add Hive service</summary>
 
@@ -80,5 +74,12 @@ docker exec -it hive_server beeline -u jdbc:hive2://localhost:10000 -n hive -p h
   
 </details>
 
+## Verify Hive service and fed data 
+```bash
+docker exec -it hive_server beeline -u jdbc:hive2://localhost:10000 -n hive -e "SHOW SCHEMAS;"
+docker exec -it hive_server beeline -u jdbc:hive2://localhost:10000 -n hive -p hive_password -e "SELECT * FROM default.mta_subway_status LIMIT 10;"
+```
+
+<img width="1500" height="1666" alt="Screenshot 2026-03-03 at 10 44 14 PM" src="https://github.com/user-attachments/assets/6d97ae2f-84a0-456f-bc63-6f22cb2a8bb4" />
 
 
