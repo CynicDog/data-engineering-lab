@@ -1,9 +1,28 @@
 # Spark–Hive → OpenMetadata (Quick Setup)
 
+## Services
+
+| Component                         | Description |
+|-----------------------------------|-------------|
+| **Metastore DB** (PostgreSQL)     | Stores table metadata (schemas, partitions, locations). No actual data files. |
+| **Hive Metastore Service** (9083) | Metadata API layer used by Spark, HiveServer2, and OpenMetadata. |
+| **HiveServer2** (10000 / 10002)   | SQL endpoint (JDBC/ODBC) for running Hive queries via Beeline or BI tools. |
+
 ## Start Containers 
 ```bash
 docker compose up 
 ```
+
+## Verify metastore database
+```bash
+docker exec -it metastore_db psql -U hive -d metastore_db -c "\dt"
+```
+
+## Verify Hive service 
+```bash
+docker exec -it hive_server beeline -u jdbc:hive2://localhost:10000 -n hive -e "SHOW SCHEMAS;"
+```
+
 
 ## Register Hive database service 
 <details><summary>Add Hive service</summary>
@@ -13,8 +32,9 @@ docker compose up
 </details>
 
 
+## Create a seed table 
 ```bash 
-docker exec -it hive_server beeline -u jdbc:hive2://localhost:10000 -n hive -e "
+docker exec -it hive_server beeline -u jdbc:hive2://localhost:10000/ -n hive -e "
 CREATE TABLE IF NOT EXISTS employee (
     id INT,
     name STRING,
@@ -29,4 +49,14 @@ INSERT INTO TABLE employee VALUES
 (3, 'Bob', 'Platform Engineer', CURRENT_TIMESTAMP());
 "
 ```
+
+## Audit the seed table's metadata 
+```bash 
+docker exec -it metastore_db psql -U hive -d metastore_db -c "
+SELECT \"TBL_ID\", \"TBL_NAME\", \"OWNER\", \"CREATE_TIME\"
+FROM \"TBLS\"
+WHERE \"TBL_NAME\" = 'employee';
+"
+```
+
 
