@@ -51,7 +51,7 @@ python3 -m grpc_tools.protoc \
 export PYTHONPATH=$PYTHONPATH:/opt/spark/work-dir/ingestion/src:/opt/spark/work-dir/ingestion/src/proto
 ```
 
-### 2. Run the submit again
+### 2. Submit the Spark Job 
 ```bash
 export SPARK_SUBMIT_OPTS="$SPARK_SUBMIT_OPTS -Dspark.openmetadata.transport.jwtToken=(YOUR_JWT_TOKEN)"
 /opt/spark/bin/spark-submit \
