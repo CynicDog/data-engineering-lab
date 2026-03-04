@@ -605,7 +605,7 @@ services:
       HIVE_SERVER2_THRIFT_PORT: 10000
       IS_RESUME: 'true'
       SERVICE_NAME: 'hiveserver2'
-      HIVE_METASTORE_URIS: "thrift://hive_metastore:9083"
+      HIVE_METASTORE_URIS: "thrift://hive-metastore:9083"
       SERVICE_OPTS: >
         -Xmx1G 
         -Dhive.server2.thrift.bind.host=0.0.0.0 
