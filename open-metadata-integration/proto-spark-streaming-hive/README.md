@@ -53,6 +53,7 @@ export PYTHONPATH=$PYTHONPATH:/opt/spark/work-dir/ingestion/src:/opt/spark/work-
 
 ### 2. Run the submit again
 ```bash
+export SPARK_SUBMIT_OPTS="$SPARK_SUBMIT_OPTS -Dspark.openmetadata.transport.jwtToken=(YOUR_JWT_TOKEN)"
 /opt/spark/bin/spark-submit \
   --master "local[*]" \
   --jars /opt/spark/conf/extra-jars/openmetadata-spark-agent-1.1.jar \
