@@ -64,7 +64,7 @@ export SPARK_SUBMIT_OPTS="$SPARK_SUBMIT_OPTS -Dspark.openmetadata.transport.jwtT
 ## Register Trino database service 
 <details><summary>Add Trino service</summary>
 
-    
+<img width="1391" height="494" alt="Screenshot 2026-03-04 at 10 58 18 PM" src="https://github.com/user-attachments/assets/31ed1b8a-aa3f-440a-82c4-910d1828d91f" />
   
 </details>
 
@@ -72,7 +72,9 @@ export SPARK_SUBMIT_OPTS="$SPARK_SUBMIT_OPTS -Dspark.openmetadata.transport.jwtT
 
 <details><summary>Add Profiler Agent</summary>
 
-    
-  
+<img width="692" height="1968" alt="Screenshot 2026-03-04 at 10 58 41 PM" src="https://github.com/user-attachments/assets/bdd0cc7e-ca0a-431a-805f-d1a64b6bb089" />
+
 </details>
 
+
+<img width="2151" height="1464" alt="image" src="https://github.com/user-attachments/assets/dd8dc630-e170-4d7b-a229-4128fc9a40b0" />
