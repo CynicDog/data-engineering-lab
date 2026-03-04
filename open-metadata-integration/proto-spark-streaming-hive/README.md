@@ -81,6 +81,4 @@ docker exec -it hive_server beeline -u jdbc:hive2://localhost:10000 -n hive -e "
 docker exec -it hive_server beeline -u jdbc:hive2://localhost:10000 -n hive -p hive_password -e "SELECT * FROM default.mta_subway_status LIMIT 10;"
 ```
 
-<img width="1500" height="1666" alt="Screenshot 2026-03-03 at 10 44 14 PM" src="https://github.com/user-attachments/assets/6d97ae2f-84a0-456f-bc63-6f22cb2a8bb4" />
-
-
+<img width="1501" height="1665" alt="Screenshot 2026-03-04 at 10 19 39 AM" src="https://github.com/user-attachments/assets/ea9faafa-588e-4e45-a874-868866ad284d" />
