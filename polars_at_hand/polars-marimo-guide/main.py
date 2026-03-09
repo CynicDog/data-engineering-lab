@@ -42,13 +42,13 @@ def _(mo):
 
 @app.cell
 def _(pl):
-    trips = (
+    ch01_trips = (
         pl.read_parquet("data/citibike/trips-2024-03-*.parquet")
         .sort("datetime_start")
     )
 
-    trips
-    return (trips,)
+    ch01_trips
+    return (ch01_trips,)
 
 
 @app.cell(hide_code=True)
@@ -91,9 +91,9 @@ def _(mo):
 
 
 @app.cell
-def _(pl, trips):
+def _(ch01_trips, pl):
     stations = (
-        trips.group_by(station=pl.col("station_start")) 
+        ch01_trips.group_by(station=pl.col("station_start")) 
         .agg(
             lon=pl.col("lon_start").median(), 
             lat=pl.col("lat_start").median(), 
@@ -143,8 +143,8 @@ def _(mo):
 
 
 @app.cell
-def _(pl, trips):
-    trips_per_day = trips.group_by_dynamic(
+def _(ch01_trips, pl):
+    trips_per_day = ch01_trips.group_by_dynamic(
         "datetime_start", group_by="borough_start", every="1d" 
     ).agg(num_trips=pl.len())
 
@@ -354,7 +354,7 @@ def _(mo):
 @app.cell
 def _(pl):
     string_df = pl.DataFrame({
-        "id": ["10000", "20000", "30000"]
+        "id": ["10000", "20000", "30000", "40000"]
     }) 
 
     print(f"Estimated size: {string_df.estimated_size('b')} bytes") 
@@ -400,6 +400,107 @@ def _(data_types_df, pl):
         pl.Float64: pl.Float32, 
         pl.String: pl.UInt8
     }))  
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Chapter 5 - Eager and Lazy APIs
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### EagerAPI: DataFrame
+    """)
+    return
+
+
+@app.cell
+def _(pl):
+    ch05_trips = pl.read_parquet("data/taxi/yellow_tripdata_*.parquet")
+
+    ch05_trips \
+        .group_by("VendorID") \
+        .agg(
+            pl.sum("total_amount"),
+            pl.sum("trip_distance"),
+        ) \
+        .select(
+            "VendorID", 
+            income_per_distance = pl.col("total_amount") / pl.col("trip_distance"),
+        ) \
+        .sort(by="income_per_distance", descending=True) \
+        .head(3)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Lazy API: LazyFrame
+    """)
+    return
+
+
+@app.cell
+def _(pl):
+    ch05_trips_lazy = pl.scan_parquet("data/taxi/yellow_tripdata_*.parquet")
+
+    ch05_trips_lazy \
+        .group_by("VendorID") \
+        .agg(
+            pl.sum("total_amount"),
+            pl.sum("trip_distance"),
+        ) \
+        .select(
+            "VendorID", 
+            income_per_distance = pl.col("total_amount") / pl.col("trip_distance"),
+        ) \
+        .sort(by="income_per_distance", descending=True) \
+        .head(3)
+    return (ch05_trips_lazy,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Streaming (Out-of-core)
+    """)
+    return
+
+
+@app.cell
+def _(ch05_trips_lazy, pl):
+    ch05_trips_lazy \
+        .group_by("VendorID") \
+        .agg(
+            pl.sum("total_amount"),
+            pl.sum("trip_distance"),
+        ) \
+        .select(
+            "VendorID", 
+            income_per_distance = pl.col("total_amount") / pl.col("trip_distance"),
+        ) \
+        .sort(by="income_per_distance", descending=True) \
+        .head(3) \
+        .collect(engine="streaming")
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Chapter 6 - Reading and Writing Data
+    """)
+    return
+
+
+@app.cell
+def _():
     return
 
 
