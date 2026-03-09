@@ -1,0 +1,15 @@
+[project]
+name = "polars-marimo-guide"
+version = "0.1.0"
+description = "Python Polars: The Definitive Guide, in marimo!"
+readme = "README.md"
+authors = [
+    { name = "Jeroen Janssens", email = "jeroen@jeroenjanssens.com" },
+    { name = "Thijs Nieuwdorp", email = "thijsnieuwdorp@hotmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "marimo[recommend,recommended]>=0.20.4",
+    "maturin>=1.12.6",
+    "ruff>=0.15.5",
+]

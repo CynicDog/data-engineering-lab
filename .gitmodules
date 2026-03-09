@@ -1,3 +1,0 @@
-[submodule "polars_at_hand/polars-marimo-guide"]
-	path = polars_at_hand/polars-marimo-guide
-	url = https://github.com/CynicDog/python-polars-the-definitive-guide-in-marimo
