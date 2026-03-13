@@ -18,7 +18,6 @@ def _():
 
     import polars as pl 
     import polars_geo
-
     return mo, pl
 
 
@@ -1070,7 +1069,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    #### Operation That Accumulate
+    #### Operation that accumulate
     """)
     return
 
@@ -1112,7 +1111,6 @@ def _(math, pl):
         shift1=pl.col("x").shift(1),
         shift2=pl.col("x").shift(-2)
     )
-
     return
 
 
@@ -1190,6 +1188,74 @@ def _(mo):
     mo.md(r"""
     ### Series-Wise Operations: Reducing to One
     """)
+    return
+
+
+@app.cell
+def _(pl):
+    pl.DataFrame({
+        "x": [1, 3, 3, 7]
+    }).with_columns(
+        mean=pl.col("x").mean(), 
+    )
+    return
+
+
+@app.cell
+def _(pl):
+    pl.DataFrame({
+        "cluster": ["a", "a", "b", "b"], 
+        "x": [1, 3, 3, 7], 
+    }) \
+        .group_by("cluster") \
+        .agg(mean=pl.col("x").mean())
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    #### Operations that are quantifiers
+    """)
+    return
+
+
+@app.cell
+def _(pl):
+    ch08_table = pl.DataFrame({
+        "x": [True, False, False], 
+        "y": [True, True, True], 
+        "z": [True, False, False], 
+    })
+
+    ch08_table
+    return (ch08_table,)
+
+
+@app.cell
+def _(ch08_table, pl):
+    # column-wise truth aggregation 
+    ch08_table.select(
+        pl.all().all().name.suffix("_all"), 
+        pl.all().any().name.suffix("_any"),
+    )
+    return
+
+
+@app.cell
+def _(ch08_table, pl):
+    # row-wise truth aggregation 
+    ch08_table.with_columns(
+        all_truthy_rows=pl.all_horizontal(pl.all()),
+        any_truthy_rows=pl.any_horizontal(pl.all()) 
+    )
+    return
+
+
+@app.cell
+def _():
+    import numpy as np 
+
     return
 
 

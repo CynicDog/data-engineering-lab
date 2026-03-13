@@ -13,5 +13,6 @@ dependencies = [
     "connectorx>=0.4.5",
     "marimo[recommend,recommended]>=0.20.4",
     "maturin>=1.12.6",
+    "numpy>=2.4.3",
     "ruff>=0.15.5",
 ]
