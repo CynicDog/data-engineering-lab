@@ -17,8 +17,18 @@ def _():
     import marimo as mo
 
     import polars as pl 
-    import polars_geo
-    return mo, pl
+    # import polars_geo
+
+    import numpy as np 
+
+    return mo, np, pl
+
+
+@app.cell
+def _(pl):
+    table = pl.DataFrame(dict(col1=["a", "\u2103"], col2=["b", "c"]))
+    print(table)
+    return
 
 
 @app.cell(hide_code=True)
@@ -508,14 +518,14 @@ def _(mo):
 
 @app.cell
 def _(pl):
-    penguins = pl.read_csv("./data/penguins.csv", null_values="NA")
-    penguins
-    return (penguins,)
+    ch06_penguins = pl.read_csv("./data/penguins.csv", null_values="NA")
+    ch06_penguins
+    return (ch06_penguins,)
 
 
 @app.cell
-def _(penguins):
-    penguins.null_count().transpose(
+def _(ch06_penguins):
+    ch06_penguins.null_count().transpose(
         include_header=True, column_names=["null_count"]
     )
     return
@@ -1252,10 +1262,97 @@ def _(ch08_table, pl):
     return
 
 
-@app.cell
-def _():
-    import numpy as np 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    #### Operations that compute statistics
+    """)
+    return
 
+
+@app.cell
+def _(np, pl):
+    _rng = np.random.default_rng() 
+    samples = _rng.normal(loc=5, scale=3, size=1_000_000)
+
+    print(
+        pl.DataFrame({"x": samples}).select(
+            max=pl.col("x").max(),
+            mean=pl.col("x").mean(),
+            quantile=pl.col("x").quantile(quantile=0.95),
+            skew=pl.col("x").skew(),
+            std=pl.col("x").std(),
+            sum=pl.col("x").sum(),
+            var=pl.col("x").var(),
+        )
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    #### Operations that count
+    """)
+    return
+
+
+@app.cell
+def _(np, pl):
+    _rng = np.random.default_rng() 
+
+    _samples = pl.Series(_rng.integers(low=0, high=10_000, size=1_729)) 
+    _samples[403] = None  # The 403rd element is made missing 
+
+    df_ints = pl.DataFrame({ "x": _samples }).with_row_index()
+    df_ints.select(
+        approx_n_unique=pl.col("x").approx_n_unique(), 
+        count=pl.col("x").count(), 
+        len=pl.col("x").len(), 
+        n_unique=pl.col("x").n_unique(), 
+        null_count=pl.col("x").null_count(), 
+    )
+    return (df_ints,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    #### Other operations
+    """)
+    return
+
+
+@app.cell
+def _(df_ints, pl):
+    df_ints.select(
+        arg_min=pl.col("x").arg_min(),
+        arg_max=pl.col("x").arg_max(),
+        first=pl.col("x").first(),
+        last=pl.col("x").last(), 
+        get=pl.col("x").get(403), 
+        implode=pl.col("x").implode(), 
+        upper_bound=pl.col("x").upper_bound()
+    )
+    return
+
+
+@app.cell
+def _(pl):
+    _table = pl.DataFrame(dict(col1=["a", "\u2103"], col2=["b", "c"]))
+    print(_table)
+    return
+
+
+@app.cell
+def _(pl):
+    df = pl.DataFrame({"text": ["01²", "ＫＡＤＯＫＡＷＡ"]})
+    new = df.with_columns(
+        nfc=pl.col("text").str.normalize("NFC"),
+        nfkc=pl.col("text").str.normalize("NFKC"),
+    )
+    print(new)
+    print(new.select(pl.all().str.len_bytes()))
     return
 
 
