@@ -1,7 +1,7 @@
 services:
   producer:
     build:
-      context: ./ipc_producer
+      context: ./producer
       dockerfile: Dockerfile
     container_name: producer
     ports:
@@ -9,7 +9,7 @@ services:
 
   consumer:
     build:
-      context: ./ipc_consumer
+      context: ./consumer
       dockerfile: Dockerfile
     container_name: consumer
     depends_on:
