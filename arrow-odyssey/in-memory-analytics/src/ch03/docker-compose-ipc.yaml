@@ -1,0 +1,18 @@
+services:
+  producer:
+    build:
+      context: ./ipc_producer
+      dockerfile: Dockerfile
+    container_name: producer
+    ports:
+      - "8000:8000"
+
+  consumer:
+    build:
+      context: ./ipc_consumer
+      dockerfile: Dockerfile
+    container_name: consumer
+    depends_on:
+      - producer
+    environment:
+      - PRODUCER_URL=http://producer:8000/data
