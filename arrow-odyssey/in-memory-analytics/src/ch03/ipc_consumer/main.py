@@ -48,32 +48,53 @@ def consume():
         # chunk_size=None means "yield as soon as data arrives from the network"
         content_iter = r.iter_content(chunk_size=None)
 
+        import pyarrow.ipc as ipc
+
         try:
-            with pa.ipc.open_stream(StreamWrapper(content_iter)) as reader:
-                print(f"[{time.strftime('%H:%M:%S')}] Schema received!")
-                print("Schema:")
-                print(reader.schema)
-                print("-" * 50)
+            raw_stream = StreamWrapper(content_iter)
 
-                for batch_idx, batch in enumerate(reader):
-                    print(f"\n[{time.strftime('%H:%M:%S')}] - Batch {batch_idx}")
-                    print(f"\nRows: {batch.num_rows}, Columns: {batch.num_columns}")
+            schema = None
+            batch_idx = 0
+            message_idx = 0
 
-                    print(f"Received batch: {batch.num_rows} rows")
+            while True:
+                message = ipc.read_message(raw_stream)
+                if message is None:
+                    print("\n[IPC] End of stream\n")
+                    break
+
+                print(f"\nIPC Message - {message_idx}")
+                print(f"  - Type: {message.type}")
+                print(f"  - Metadata size: {message.metadata.size} bytes")
+
+                body_size = message.body.size if message.body is not None else 0
+                print(f"  - Body length: {body_size} bytes")
+
+                if message.type == "schema":
+                    schema = ipc.read_schema(message)
+
+                    print(f"\n[{time.strftime('%H:%M:%S')}] Schema received!")
+                    print("Schema:")
+                    print(schema)
+                    print("-" * 50)
+
+                elif message.type == "record batch":
+                    batch = ipc.read_record_batch(message, schema)
+
+                    print(f"  - Rows: {batch.num_rows}, Columns: \"{batch.num_columns}\"")
 
                     print("\nColumns Details:")
                     for col_idx, column in enumerate(batch.columns):
-                        field = batch.schema[col_idx]
+                        field = schema[col_idx]
                         print(f"\n- Column {col_idx} ({field.name})")
 
-                        # Arrow Array object
                         arr = column
 
                         print(f"  - length: {len(arr)}")
                         print(f"  - null count: {arr.null_count}")
                         print(f"  - offset: {arr.offset}")
 
-                        # Arrow arrays are just views over raw IPC buffers (zero-copy, no deserialization)
+                        # Arrow arrays are views over raw IPC buffers (zero-copy)
                         buffers = arr.buffers()
 
                         print(f"    buffers ({len(buffers)} total):")
@@ -81,15 +102,24 @@ def consume():
                             if buf is None:
                                 print(f"    - buffer[{buf_idx}]: None")
                             else:
-                                print(f"    - buffer[{buf_idx}]: size={buf.size} bytes, address={hex(buf.address)}")
+                                preview = buf.to_pybytes()[:16]
+                                print(
+                                    f"    - buffer[{buf_idx}]: size={buf.size} bytes, "
+                                    f"address={hex(buf.address)}, first16={preview}"
+                                )
 
                     print("\nMemory footprint:")
                     print(f"- batch.nbytes: {batch.nbytes} bytes\n")
 
                     print("-" * 50)
                     sys.stdout.flush()
+
+                    batch_idx += 1
+
+                message_idx += 1
+
         except Exception as e:
-            print(f"Error during IPC streaming: {e}")
+            print(f"\n{e}")
 
 
 if __name__ == "__main__":
