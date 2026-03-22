@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.20.4"
+__generated_with = "0.21.1"
 app = marimo.App(width="medium")
 
 
@@ -388,8 +388,98 @@ def _(forestfires):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Chapter 3
+    # Chapter 4
     """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## ArrowSchema
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    Apache Arrow's C Data Interface unifies table and column metadata by treating a full record batch as a single **Struct** data type. Using the recursive `children` pointer within the `ArrowSchema` structure, a table is represented as a root node with the format string `+s`, where each child pointer simply represents an individual column. This design allows any function capable of processing nested data to automatically handle entire tables, reducing the binary interface to a single, self-referential structure that can describe any dataset complexity through a single memory pointer.
+    """)
+    return
+
+
+@app.cell
+def _(pa):
+    from cffi import FFI
+    import struct
+
+    ffi = FFI()
+    ffi.cdef("""
+        struct ArrowSchema {
+          const char* format;
+          const char* name;
+          const char* metadata;
+          int64_t flags;
+          int64_t n_children;
+          struct ArrowSchema** children;
+          struct ArrowSchema* dictionary;
+          void (*release)(struct ArrowSchema*);
+          void* private_data;
+        };
+    """)
+
+    def decode_c_string(c_str):
+        return ffi.string(c_str).decode('utf-8') if c_str != ffi.NULL else "None"
+
+    def parse_metadata(metadata_ptr):
+        if metadata_ptr == ffi.NULL: return None
+        buf = ffi.buffer(metadata_ptr, 1024)
+        n_pairs = struct.unpack_from('<i', buf, 0)[0]
+        pos, result = 4, {}
+        for _ in range(n_pairs):
+            k_len = struct.unpack_from('<i', buf, pos)[0]
+            pos += 4
+            key = buf[pos:pos+k_len].decode('utf-8')
+            pos += k_len
+            v_len = struct.unpack_from('<i', buf, pos)[0]
+            pos += 4
+            value = buf[pos:pos+v_len].decode('utf-8')
+            pos += v_len
+            result[key] = value
+        return result
+
+    def print_schema_recursive(node, indent=0):
+        pref = "  " * indent
+        name = decode_c_string(node.name)
+        fmt = decode_c_string(node.format)
+        meta = parse_metadata(node.metadata)
+    
+        print(f"{pref}* Node: {name}")
+        print(f"{pref}  - Format: {fmt}")
+        print(f"{pref}  - Children: {node.n_children}")
+    
+        if meta:
+            print(f"{pref}  - Metadata: {meta}")
+    
+        if node.dictionary != ffi.NULL:
+            print(f"{pref}  - [Dictionary Encoded]")
+
+        for i in range(node.n_children):
+            print_schema_recursive(node.children[i], indent + 2)
+
+    # Create a complex schema: ID, and a nested list of strings
+    schema = pa.schema([
+        pa.field("id", pa.int64(), metadata={"Sensor": "A"}),
+        pa.field("tags", pa.list_(pa.string()))
+    ])
+
+    c_schema = ffi.new("struct ArrowSchema*")
+    schema._export_to_c(int(ffi.cast("uintptr_t", c_schema)))
+
+    print("Apache ArrowSchema Hierarchy")
+    print("=" * 30)
+    print_schema_recursive(c_schema)
     return
 
 
