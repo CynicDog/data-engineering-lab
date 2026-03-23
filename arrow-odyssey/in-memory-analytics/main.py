@@ -26,7 +26,7 @@ def _():
     import pyarrow as pa
     import numpy as np 
 
-    return mo, pa
+    return mo, np, pa
 
 
 @app.class_definition
@@ -414,8 +414,9 @@ def _(pa):
     from cffi import FFI
     import struct
 
-    ffi = FFI()
-    ffi.cdef("""
+    # Initialize FFI and the Shared Map
+    ffi_provider = FFI()
+    ffi_provider.cdef("""
         struct ArrowSchema {
           const char* format;
           const char* name;
@@ -427,59 +428,229 @@ def _(pa):
           void (*release)(struct ArrowSchema*);
           void* private_data;
         };
+
+        struct ArrowArray {
+          int64_t length;
+          int64_t null_count;
+          int64_t offset;
+          int64_t n_buffers;
+          int64_t n_children;
+          const void** buffers;
+          struct ArrowArray** children;
+          struct ArrowArray* dictionary;
+          void (*release)(struct ArrowArray*);
+          void* private_data;
+        };
     """)
 
-    def decode_c_string(c_str):
-        return ffi.string(c_str).decode('utf-8') if c_str != ffi.NULL else "None"
 
-    def parse_metadata(metadata_ptr):
-        if metadata_ptr == ffi.NULL: return None
-        buf = ffi.buffer(metadata_ptr, 1024)
-        n_pairs = struct.unpack_from('<i', buf, 0)[0]
-        pos, result = 4, {}
-        for _ in range(n_pairs):
-            k_len = struct.unpack_from('<i', buf, pos)[0]
-            pos += 4
-            key = buf[pos:pos+k_len].decode('utf-8')
-            pos += k_len
-            v_len = struct.unpack_from('<i', buf, pos)[0]
-            pos += 4
-            value = buf[pos:pos+v_len].decode('utf-8')
-            pos += v_len
-            result[key] = value
-        return result
+    def decode_c_string(c_str):
+        return ffi_provider.string(c_str).decode('utf-8') if c_str != ffi_provider.NULL else "None"
+
 
     def print_schema_recursive(node, indent=0):
         pref = "  " * indent
         name = decode_c_string(node.name)
         fmt = decode_c_string(node.format)
-        meta = parse_metadata(node.metadata)
-    
         print(f"{pref}* Node: {name}")
         print(f"{pref}  - Format: {fmt}")
         print(f"{pref}  - Children: {node.n_children}")
     
-        if meta:
-            print(f"{pref}  - Metadata: {meta}")
-    
-        if node.dictionary != ffi.NULL:
-            print(f"{pref}  - [Dictionary Encoded]")
-
         for i in range(node.n_children):
             print_schema_recursive(node.children[i], indent + 2)
 
-    # Create a complex schema: ID, and a nested list of strings
-    schema = pa.schema([
-        pa.field("id", pa.int64(), metadata={"Sensor": "A"}),
-        pa.field("tags", pa.list_(pa.string()))
-    ])
+    _data_payload = [
+        pa.array([1, 2, 3], type=pa.int64()),
+        pa.array([["apple"], ["orange", "banana"], []], type=pa.list_(pa.string()))
+    ]
+    _batch_payload = pa.RecordBatch.from_arrays(_data_payload, names=["id", "tags"])
 
-    c_schema = ffi.new("struct ArrowSchema*")
-    schema._export_to_c(int(ffi.cast("uintptr_t", c_schema)))
+    shared_c_schema = ffi_provider.new("struct ArrowSchema*")
+    shared_c_array = ffi_provider.new("struct ArrowArray*")
 
-    print("Apache ArrowSchema Hierarchy")
-    print("=" * 30)
-    print_schema_recursive(c_schema)
+    _batch_payload._export_to_c(
+        int(ffi_provider.cast("uintptr_t", shared_c_array)),
+        int(ffi_provider.cast("uintptr_t", shared_c_schema))
+    )
+
+
+    print("[ Apache ArrowSchema Hierarchy ]\n")
+    print_schema_recursive(shared_c_schema)
+    return (
+        FFI,
+        decode_c_string,
+        ffi_provider,
+        shared_c_array,
+        shared_c_schema,
+        struct,
+    )
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## ArrowArray
+    """)
+    return
+
+
+@app.cell
+def _(decode_c_string, ffi_provider, shared_c_array, shared_c_schema, struct):
+    def print_array_deep_recursive(schema_node, array_node, indent=0):
+        pref = "  " * indent
+        sub_pref = "  " * (indent + 1)
+        buf_pref = "  " * (indent + 2)
+    
+        name = decode_c_string(schema_node.name)
+        fmt = decode_c_string(schema_node.format)
+    
+        # 1. Header & Metadata
+        print(f"{pref}- Column: [{name}] (Format: {fmt})")
+        print(f"{sub_pref}- Length: {array_node.length}")
+        print(f"{sub_pref}- Nulls: {array_node.null_count}")
+    
+        # 2. Buffers Section
+        if array_node.n_buffers > 0:
+            print(f"{sub_pref}- Buffers")
+            for i in range(array_node.n_buffers):
+                ptr = array_node.buffers[i]
+                print(f"{buf_pref}- Buffer {i}")
+            
+                if ptr == ffi_provider.NULL:
+                    print(f"{buf_pref}  - Address: NULL")
+                else:
+                    print(f"{buf_pref}  - Address: {ptr}")
+                    # Peek at raw bytes for every non-null buffer
+                    peek_size = 32
+                    raw_peek = ffi_provider.buffer(ptr, peek_size)[:]
+                    print(f"{buf_pref}  - Value: {raw_peek}")
+
+        # 3. Final Value Decoding Logic (Logical View)
+        if fmt in ('l', 'q'):
+            ptr = array_node.buffers[1]
+            if ptr != ffi_provider.NULL:
+                byte_size = 4 if fmt == 'l' else 8
+                struct_fmt = 'i' if fmt == 'l' else 'q'
+                raw = ffi_provider.buffer(ptr, array_node.length * byte_size)
+                values = struct.unpack(f'<{array_node.length}{struct_fmt}', raw)
+                print(f"{sub_pref}- Decoded Values: {list(values)}")
+
+        elif fmt == '+l':
+            ptr = array_node.buffers[1]
+            if ptr != ffi_provider.NULL:
+                off_raw = ffi_provider.buffer(ptr, (array_node.length + 1) * 4)
+                offsets = struct.unpack(f'<{array_node.length + 1}i', off_raw)
+                print(f"{sub_pref}- Decoded Offsets: {list(offsets)}")
+
+        elif fmt == 'u':
+            off_ptr = array_node.buffers[1]
+            data_ptr = array_node.buffers[2]
+            if off_ptr != ffi_provider.NULL and data_ptr != ffi_provider.NULL:
+                off_raw = ffi_provider.buffer(off_ptr, (array_node.length + 1) * 4)
+                offsets = struct.unpack(f'<{array_node.length + 1}i', off_raw)
+                total_bytes = offsets[-1]
+                string_data = ffi_provider.buffer(data_ptr, total_bytes)[:]
+                decoded = [string_data[offsets[i]:offsets[i+1]].decode('utf-8') 
+                          for i in range(array_node.length)]
+                print(f"{sub_pref}- Decoded Values: {decoded}")
+
+        # 4. Recursion for Children
+        if array_node.n_children > 0:
+            print(f"{sub_pref}- Children ({array_node.n_children}):")
+            for i in range(array_node.n_children):
+                print_array_deep_recursive(schema_node.children[i], array_node.children[i], indent + 4)
+
+    print("[ Apache Arrow Data Physical Layout and Decoded Values ]\n")
+    print_array_deep_recursive(shared_c_schema, shared_c_array)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## ArrowDeviceArray
+    """)
+    return
+
+
+@app.cell
+def _(FFI, np, pa):
+    ffi_dev = FFI()
+    ffi_dev.cdef("""
+        typedef int32_t ArrowDeviceType;
+
+        struct ArrowArray {
+            int64_t length;
+            int64_t null_count;
+            int64_t offset;
+            int64_t n_buffers;
+            int64_t n_children;
+            const void** buffers;
+            struct ArrowArray** children;
+            struct ArrowArray* dictionary;
+            void (*release)(struct ArrowArray*);
+            void* private_data;
+        };
+
+        struct ArrowDeviceArray {
+            struct ArrowArray array;
+            int64_t device_id;
+            ArrowDeviceType device_type;
+            void* sync_event;
+            int64_t reserved[3];
+        };
+    """)
+
+    # Create CPU-based device data 
+    data_raw = np.array([100, 200, 300], dtype=np.int64)
+    arrow_arr = pa.array(data_raw)
+
+    # We allocate the larger 'ArrowDeviceArray' struct
+    c_device_array = ffi_dev.new("struct ArrowDeviceArray*")
+
+    # Exporting specifically to the Device C-interface
+    arrow_arr._export_to_c_device(int(ffi_dev.cast("uintptr_t", c_device_array)))
+
+    # Inspect the wrapper (ArrowDeviceArray)
+    print("1. Device Wrapper Layer")
+    print(f"Device Type : {c_device_array.device_type}")
+    print(f"Device ID   : {c_device_array.device_id}")
+    print(f"Sync Event  : {c_device_array.sync_event}")
+    print(f"Reserved    : {list(c_device_array.reserved)}")
+
+    # Inspect the embedded data 
+    inner = c_device_array.array
+    print("\n2. Embedded Data Layer")
+    print(f"Length : {inner.length}")
+    print(f"Buffers: {inner.n_buffers}")
+
+    for i in range(inner.n_buffers):
+        ptr = inner.buffers[i]
+        print(f"  [Buffer {i} Address]: {ptr}")
+
+    # Clean up 
+    if inner.release != ffi_dev.NULL:
+        inner.release(ffi_dev.addressof(inner))
+    return ffi_dev, inner
+
+
+@app.cell
+def _(ffi_dev, inner, struct):
+    # Access the data buffer 
+    # inner.buffers[1] is the pointer to our actual integers
+    data_ptr = inner.buffers[1]
+
+    # Create a virtual view
+    # We map 24 bytes (3 elements * 8 bytes each) starting at that address
+    raw_bytes = ffi_dev.buffer(data_ptr, 24)
+
+    # Interpret the bytes 
+    # '<3q' means: Little-endian, 3 elements, signed long long (int64)
+    decoded_values = struct.unpack('<3q', raw_bytes)
+
+    print(f"Address          : {data_ptr}")
+    print(f"Raw Bytes (Hex)  : {raw_bytes[:].hex()}")
+    print(f"Decoded from RAM : {decoded_values}")
     return
 
 
