@@ -1,0 +1,15 @@
+[project]
+name = "polars-cookbook"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "deltalake>=1.5.0",
+    "fsspec>=2026.2.0",
+    "marimo>=0.21.1",
+    "polars>=1.39.3",
+    "pyarrow>=23.0.1",
+    "requests>=2.32.5",
+    "s3fs>=2026.2.0",
+]
