@@ -23,10 +23,25 @@ def _(mo):
 @app.cell
 def _():
     import marimo as mo
-    import pyarrow as pa
+    import urllib.request
+
     import numpy as np 
 
-    return mo, np, pa
+    import pyarrow as pa
+    import pyarrow.parquet
+    import pyarrow.csv 
+    import pyarrow.dataset
+    import pyarrow.acero
+
+    from pyarrow import fs 
+
+    import boto3
+
+    import io
+    from botocore import UNSIGNED
+    from botocore.config import Config
+
+    return fs, mo, np, pa, pyarrow, urllib
 
 
 @app.class_definition
@@ -348,16 +363,6 @@ def _(mo):
 
 
 @app.cell
-def _():
-    from pyarrow import fs 
-    import pyarrow.csv 
-
-    import urllib.request
-
-    return fs, urllib
-
-
-@app.cell
 def _(fs):
     local_fs = fs.LocalFileSystem()
     f, p = fs.FileSystem.from_uri('file:///Users/ginsenglee')
@@ -455,7 +460,7 @@ def _(pa):
         print(f"{pref}* Node: {name}")
         print(f"{pref}  - Format: {fmt}")
         print(f"{pref}  - Children: {node.n_children}")
-    
+
         for i in range(node.n_children):
             print_schema_recursive(node.children[i], indent + 2)
 
@@ -500,22 +505,22 @@ def _(decode_c_string, ffi_provider, shared_c_array, shared_c_schema, struct):
         pref = "  " * indent
         sub_pref = "  " * (indent + 1)
         buf_pref = "  " * (indent + 2)
-    
+
         name = decode_c_string(schema_node.name)
         fmt = decode_c_string(schema_node.format)
-    
+
         # 1. Header & Metadata
         print(f"{pref}- Column: [{name}] (Format: {fmt})")
         print(f"{sub_pref}- Length: {array_node.length}")
         print(f"{sub_pref}- Nulls: {array_node.null_count}")
-    
+
         # 2. Buffers Section
         if array_node.n_buffers > 0:
             print(f"{sub_pref}- Buffers")
             for i in range(array_node.n_buffers):
                 ptr = array_node.buffers[i]
                 print(f"{buf_pref}- Buffer {i}")
-            
+
                 if ptr == ffi_provider.NULL:
                     print(f"{buf_pref}  - Address: NULL")
                 else:
@@ -631,26 +636,61 @@ def _(FFI, np, pa):
     # Clean up 
     if inner.release != ffi_dev.NULL:
         inner.release(ffi_dev.addressof(inner))
-    return ffi_dev, inner
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Chapter 5
+    """)
+    return
 
 
 @app.cell
-def _(ffi_dev, inner, struct):
-    # Access the data buffer 
-    # inner.buffers[1] is the pointer to our actual integers
-    data_ptr = inner.buffers[1]
+def _(pyarrow):
+    _dataset = pyarrow.dataset.dataset("data/green_tripdata_2025-01.parquet", format="parquet")
 
-    # Create a virtual view
-    # We map 24 bytes (3 elements * 8 bytes each) starting at that address
-    raw_bytes = ffi_dev.buffer(data_ptr, 24)
+    _scanner = _dataset.scanner()
+    ch05_green_tripdata = _scanner.to_table()
 
-    # Interpret the bytes 
-    # '<3q' means: Little-endian, 3 elements, signed long long (int64)
-    decoded_values = struct.unpack('<3q', raw_bytes)
+    ch05_green_tripdata
+    return
 
-    print(f"Address          : {data_ptr}")
-    print(f"Raw Bytes (Hex)  : {raw_bytes[:].hex()}")
-    print(f"Decoded from RAM : {decoded_values}")
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Types of Functions in Acero
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Aggregations
+
+    An aggregation function operates on an array (optionally chunked) or a scalar value and reduces the input to a scalar output value.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Element-wise (or scalar functions)
+    Unary or single-input functions in this category operate on each element of the input separately
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Array-wise (or vector functions)
+    Functions in this category use the entire array for their operations, frequently performing transformations or outputting a different length than the input array.
+    """)
     return
 
 
