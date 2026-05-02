@@ -5,6 +5,8 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "marimo>=0.23.4",
+    "marimo[recommended]>=0.23.4",
+    "nbconvert>=7.17.1",
+    "playwright>=1.59.0",
     "pyspark>=4.1.1",
 ]
