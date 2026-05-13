@@ -1,146 +1,106 @@
-# Medallion Architecture on Databricks: Silver Scope & Layer Orchestration
+# Medallion: Silver Scope and Layer Triggering
 
-A working memo on two open design questions for our enterprise data platform:
+Two open design questions for our Databricks medallion build. We are committed to a three-layer model (Bronze, Silver, Gold) with no sub-tiers, so each layer's role must absorb the full responsibility implied by that constraint.
 
-1. What belongs in the Silver layer, and how 1:1 it should stay with Bronze.
-2. How to trigger each layer so Silver does not run ahead of Bronze, and Gold does not run ahead of Silver, at enterprise scale.
+This note frames the trade-offs and lands on a recommendation for each.
 
-## Context and constraints
+## Question 1: What belongs in Silver?
 
-We are standardizing on Databricks with Delta Lake as the lakehouse format. The platform serves multiple business domains, has SLA-bound downstream consumers (BI, ML, regulatory reporting), and must scale to hundreds of pipelines maintained by multiple teams. "Enterprise scalable" here means three things in practice:
+### The tension
 
-- **Operational scalability** — onboarding new sources and new marts must not require redesigning the DAG.
-- **Organizational scalability** — domain teams should own their slice of Silver/Gold without coordinating every release.
-- **Cost and runtime scalability** — incremental processing, not full refreshes; idempotent runs; clear SLAs per table.
+Two intuitions pull in opposite directions:
 
-## Question 1: What goes in Silver?
+1. **Silver as 1:1 cleansed Bronze.** Each Bronze table maps to exactly one Silver table. Silver only performs deduplication, type casting, null handling, PII masking, schema enforcement, and CDC application. No joins, no integration.
+2. **Silver as conformed business entities.** Silver consolidates multi-source records into canonical entities (e.g., one `customer`, one `account`, one `policy`) with conformed keys and dimensions. Joins and integration happen here.
 
-### The two extremes
+If Silver stays 1:1, Gold inherits *all* integration logic on top of its aggregation logic. Gold becomes the only place where cross-source semantics are resolved, which is the failure mode the medallion pattern was originally designed to avoid.
 
-**Strict 1:1 Silver (Bronze-shaped, just cleansed).**
-Each Bronze table maps to exactly one Silver table. Silver does deduplication, type casting, PII handling, schema enforcement, late-arriving-data handling — but no joins, no business logic, no conformed dimensions.
+### Option A: Silver as 1:1 cleansed Bronze
 
-- Pros: Trivial lineage. Easy to reprocess. Source-system-shaped, so SMEs from the source domain can still recognize it. Cheap to maintain.
-- Cons: Gold inherits every conforming join, every dimension resolution, every cross-source rule. Gold becomes a monolith of business logic + mart shaping. Two Gold marts that both need "customer enriched with account hierarchy" will each rebuild it, drifting over time.
+Pros:
+- Trivial lineage: one Bronze table, one Silver table.
+- Deterministic and easy to reprocess. A Bronze backfill rebuilds exactly the matching Silver table.
+- No fan-in dependencies inside Silver, which simplifies orchestration.
+- Source-system schema drift is contained at the Silver layer per source.
 
-**Heavy Silver (pre-joined, business-ready entities).**
-Silver tables represent conformed business entities (Customer, Account, Transaction) already joined across sources, with surrogate keys and SCD2 history.
+Cons:
+- Every Gold mart must redo the same joins, deduplications across sources, and conformance work. Integration logic gets duplicated across marts and drifts over time.
+- No single source of truth for business entities. "What is a customer?" gets answered N times in N Gold tables.
+- Gold becomes the entire enterprise data model plus aggregation, which is too much for one layer in a three-layer architecture.
+- Data quality contracts have to live at the Gold boundary, far from where the messiness originates.
 
-- Pros: Gold is thin — mostly aggregations and presentation shaping. Reuse across marts is high.
-- Cons: Silver becomes the bottleneck. One source schema change ripples into many Silver tables. Ownership gets muddy (who owns "Customer" when five source systems feed it?). Reprocessing is expensive.
+### Option B: Silver as conformed business entities
 
-### What we recommend: a two-tier Silver
+Pros:
+- One canonical definition per business entity. Conformed dimensions exist here, not in each mart.
+- Gold shrinks to its proper role: business-specific aggregations, marts, feature tables, and reporting shapes.
+- Cross-source quality issues surface at Silver, where engineering owns them, rather than leaking into analyst-owned Gold queries.
+- Aligns with the Databricks reference definition of the medallion pattern (Silver = cleansed *and* conformed).
 
-The pattern that scales in practice is to split Silver into two sub-layers, both still in the Silver medallion but with different responsibilities. Databricks documentation and most large Delta deployments converge on something like this.
+Cons:
+- Silver builds have fan-in: a Silver entity table may depend on several Bronze tables, which complicates orchestration (see Question 2).
+- The Silver/Gold boundary needs an explicit rule, otherwise aggregations creep into Silver.
+- Reprocessing a single Bronze source no longer cleanly rebuilds one Silver table; it triggers re-conformance.
 
-**Silver-Cleansed (sometimes called Silver-Standardized).**
-Strict 1:1 with Bronze. One table per source table. Responsibilities:
+### Recommendation
 
-- Schema enforcement and type normalization
-- Deduplication, idempotency keys
-- PII masking / tokenization where required at rest
-- Late-arriving-data and CDC merge (MERGE INTO on a Delta key)
-- Soft-delete handling, tombstones
-- Data quality expectations (DLT expectations or equivalent) — quarantine bad rows, don't drop silently
-- Source-system-shaped column names retained (or renamed only by a strict convention)
+**Adopt Option B with an explicit boundary rule.** In a three-layer architecture, Silver has to carry conformance, otherwise Gold collapses under combined integration plus aggregation duties.
 
-This tier is owned by the **source-aligned team** (the team closest to the producing system).
+Boundary rule to enforce in code review:
 
-**Silver-Conformed (sometimes called Silver-Integrated or Silver+).**
-Cross-source entities. One table per business concept, not per source. Responsibilities:
+- **Silver tables** are entity- or event-grain, conformed across sources, with stable business keys. No business-specific aggregations. No mart-shaped pivots. Slowly-changing dimension handling lives here.
+- **Gold tables** are mart-shaped: aggregations, denormalized reporting tables, feature tables, KPI tables. They consume Silver and never read Bronze directly.
 
-- Conformed dimensions with surrogate keys
-- SCD2 history where the business needs it
-- Cross-source joins that are *stable business definitions*, not mart-specific shaping
-- Reference data resolution (currency, geography, calendar)
-- Entity resolution / master-data joins
+Because we cannot introduce Silver sub-tiers, the discipline is to keep Silver narrowly scoped to "conformed entities and events" and resist the temptation to add intermediate staging tables inside Silver. If a transformation feels like it needs an intermediate, it usually belongs in a CTE or a temporary view inside the same Silver job, not a new table.
 
-This tier is owned by the **domain team** (Customer domain, Finance domain, etc.), not the source teams.
+## Question 2: How is each layer triggered?
 
-**Gold** then becomes what it should be: mart-shaped, consumer-specific aggregates and denormalized views built on Silver-Conformed. A mart-specific join that only one report needs lives in Gold, not Silver-Conformed.
+Bronze cannot precede source arrival; Silver cannot precede Bronze; Gold cannot precede Silver. The orchestration model has to enforce this without timing assumptions.
 
-### How to decide where a join belongs
+Databricks native trigger types available to us:
 
-A useful test: would *more than one* downstream mart want this exact join, with the exact same business semantics? If yes, it belongs in Silver-Conformed. If no, it belongs in Gold. The cost of getting this wrong is asymmetric — a wrongly-placed Silver join creates platform-wide coupling; a wrongly-placed Gold join just gets refactored later when a second consumer appears.
+- **Schedule** (cron-style).
+- **File Arrival** (fires when objects land in a watched path).
+- **Table Update** (fires when an upstream Delta table commits a new version).
+- *Continuous is excluded by policy.*
 
-### What Silver should never do
+We can also write custom trigger logic, e.g., a job that polls upstream commit timestamps or sentinel tables before running.
 
-- Business-specific filters ("active customers as defined by the marketing team")
-- Mart-specific aggregations
-- Presentation formatting (currency symbols, display names)
-- Time-bucketing chosen by a specific report
+### Option A: Scheduled cascade
 
-These all belong in Gold or in the semantic layer above it.
+Each layer is on a schedule with a time offset (Bronze 02:00, Silver 03:00, Gold 04:00). Simple, predictable, and easy to reason about, but fragile: if Bronze is late or fails, Silver runs against stale data and Gold inherits the gap silently. This pattern only works when source arrival times are tightly bounded and SLAs allow a wide buffer.
 
-## Question 2: How to trigger each layer
+### Option B: Event-driven cascade
 
-The intuition in the question is exactly right: Silver cannot blindly run on a schedule that hopes Bronze finished, and Gold cannot run hoping Silver finished. At enterprise scale, time-based chaining breaks the first time a source is late.
+Bronze is triggered by File Arrival from the source landing zone. Silver is triggered by Table Update on its Bronze parents. Gold is triggered by Table Update on its Silver parents. Each layer fires only after upstream data is actually committed.
 
-### The three trigger models, and when each fits
+This is clean for the 1:1 case, but Question 1 lands on conformed Silver, which means Silver tables have multiple Bronze parents. A naive Table Update trigger fires Silver on *every* Bronze commit, leading to redundant runs and partial-conformance reads (Silver computes against Bronze A's new data and Bronze B's older snapshot).
 
-**1. Schedule-based ("run Silver at 02:00").**
-Simple, but fragile. Works only for tightly-controlled batch sources where Bronze ingestion has a guaranteed completion time. Do not use as the primary mechanism for an enterprise platform — use it only as a *floor* (e.g., "run no earlier than 02:00") combined with one of the below.
+### Option C: Workflow-orchestrated DAG
 
-**2. Dependency-based (DAG / Workflow orchestration).**
-Each task declares its upstream tasks. The orchestrator runs Silver-Cleansed only after the relevant Bronze task succeeds, and Gold only after its Silver dependencies succeed.
+A Databricks Workflow (Job) declares the full Bronze to Silver to Gold DAG as tasks with explicit dependencies. The Workflow itself is started by one trigger at the top (File Arrival on the landing zone, or Schedule). Internal ordering is the orchestrator's responsibility, not the trigger system's.
 
-On Databricks the two practical options:
+For conformed Silver this is the natural fit: a Silver task lists all its Bronze parents as upstream tasks, and the orchestrator only starts Silver when *all* parents finish. The same holds for Gold.
 
-- **Databricks Workflows (Jobs)** with multi-task jobs and task dependencies. Good for explicit, hand-authored DAGs. Scales to hundreds of tasks per job and can fan out.
-- **Delta Live Tables / Lakeflow Declarative Pipelines.** You declare tables and their `LIVE` dependencies; DLT computes the DAG and runs them in correct order with built-in expectations, retries, and incremental processing. This is the most enterprise-scalable option for *within-pipeline* dependencies because the DAG is derived from code, not maintained separately.
+### Option D: Custom programmatic trigger
 
-**3. Event-driven (data arrival triggers next layer).**
-Bronze ingestion via Auto Loader (file notifications from cloud storage). When new files land, Auto Loader picks them up. Downstream layers can be triggered by:
+A controller job that queries Delta commit history or a sentinel table, evaluates "is the full upstream set ready and consistent," and then dispatches downstream layers. Maximum flexibility but maximum operational surface area. Justified only when native primitives cannot express the readiness condition.
 
-- Delta change-data-feed (CDF) on the upstream table — Silver reads only changed rows since its last commit version.
-- File-arrival triggers on Databricks Workflows (`trigger: file_arrival`).
-- Continuous DLT pipelines (streaming mode), where Silver and Gold are streaming Delta reads from upstream.
+### Recommendation
 
-Event-driven scales best for high-frequency or unpredictable arrival patterns, but it is more operationally complex.
+**Workflow-orchestrated DAG (Option C) as the default, with File Arrival as the top-of-DAG trigger for streaming-style sources and Schedule for batch-window sources.**
 
-### What we recommend: a hybrid pattern
+Concrete pattern:
 
-For an enterprise platform with mixed source cadences (some batch, some streaming, some event-driven), a single orchestration model rarely fits everything. The pattern that holds up:
+- **Bronze ingestion jobs** are leaf tasks in the Workflow. For continuously arriving sources, the Workflow is started by **File Arrival** on the landing zone path. For batch sources with known windows (nightly extracts, vendor drops), the Workflow is started by **Schedule**.
+- **Silver tasks** declare all relevant Bronze ingestion tasks as upstream dependencies. They run only when every parent succeeds, which gives us atomic conformance reads.
+- **Gold tasks** declare their Silver parents as upstream dependencies. Same atomicity guarantee.
+- **Table Update triggers** are reserved for cases where a downstream consumer lives in a *separate* Workflow (cross-pipeline propagation) and we genuinely want event-driven decoupling. Inside one logical pipeline, dependencies belong in the DAG, not in trigger rules.
+- **Custom programmatic triggers** are reserved for readiness conditions Workflows cannot express, such as "wait for all of N partner files where N is dynamic" or "only run if quality gate X passed in a separate system."
 
-**Within a domain pipeline: DLT / Lakeflow declarative.**
-Bronze → Silver-Cleansed → Silver-Conformed → Gold within a single business domain are expressed as a declarative pipeline. DLT computes the DAG, handles incremental processing via streaming tables or materialized views, and runs the layers in the correct order with no scheduler glue. This eliminates 80% of the "did Silver wait for Bronze?" problem because the dependency is in the code.
+This gives us enterprise-grade ordering guarantees without inventing our own controller, keeps the dependency graph visible in one place (the Workflow definition), and preserves File Arrival's responsiveness at the boundary where it matters most: source-to-Bronze.
 
-**Across pipelines: Workflows or an external orchestrator.**
-Cross-domain dependencies (e.g., the Finance Gold mart needs Customer Silver-Conformed from the Customer domain) are wired with Databricks Workflows task dependencies, or with Airflow / Dagster if you already run one platform-wide. The orchestrator triggers a downstream pipeline only after the upstream pipeline run that produced the needed Delta version has succeeded.
+## Summary
 
-**For SLA enforcement: data-aware triggers.**
-The downstream pipeline triggers on the *Delta table version* it depends on, not on the clock. Two mechanisms:
-
-- **Trigger on file arrival** for Bronze ingestion entry points.
-- **Trigger on Delta table change** (poll the table's commit history, or use change-data-feed) for cross-pipeline dependencies. Lakeflow supports table-update triggers; Airflow has Databricks sensors that do the same.
-
-This means Silver runs *because Bronze produced a new version*, not because the clock ticked. Gold runs *because Silver produced a new version*. If Bronze is late, the chain naturally waits.
-
-### Idempotency and reprocessing
-
-None of the above matters if a re-run corrupts state. Enforce:
-
-- Every Silver and Gold transformation reads from the upstream Delta table using a commit version or timestamp, and writes via `MERGE INTO` keyed on a stable business key.
-- Streaming reads checkpoint per table, per pipeline.
-- Backfills are explicit jobs that target a date range and write with the same `MERGE INTO` semantics — re-running them is safe.
-- Every table has a documented owner, SLA, and freshness expectation registered in Unity Catalog.
-
-### Failure handling
-
-At enterprise scale, partial failures are the common case, not the exception. Two rules:
-
-- **Quarantine, don't fail the pipeline, on data-quality breaches.** DLT expectations with `EXPECT ... ON VIOLATION DROP ROW` (or `QUARANTINE`) keep the pipeline running while flagging bad rows for review. A whole-pipeline failure because one row violated a check will train teams to disable checks.
-- **Fail loudly on schema or contract breaches.** A source schema change should stop the pipeline and page the source-aligned team — never auto-evolve into Silver.
-
-## Summary recommendations
-
-- **Silver scope:** split Silver into Silver-Cleansed (1:1 with Bronze, source-aligned ownership) and Silver-Conformed (business entities, domain-aligned ownership). Put cross-source joins in Silver-Conformed only if more than one mart will use them with identical semantics. Mart-specific logic stays in Gold.
-- **Triggering:** within a pipeline, use DLT / Lakeflow declarative pipelines so the DAG is derived from code. Across pipelines, use data-aware triggers (file arrival, Delta table updates) via Databricks Workflows or an external orchestrator. Avoid clock-based chaining as the primary mechanism.
-- **Non-negotiables for enterprise scale:** idempotent MERGEs everywhere, Unity Catalog ownership and lineage on every table, expectations with quarantine semantics, and explicit per-table SLAs.
-
-## Open questions to resolve next
-
-- Do we standardize on DLT / Lakeflow for all new pipelines, or allow plain Workflows + notebooks for teams not ready?
-- Which team owns Silver-Conformed for cross-domain entities like Customer (source-team federation vs. a central data-platform team)?
-- What is our backfill SLA — how fast must we be able to reprocess 90 days of Gold after a Silver fix?
-- Do we adopt an external orchestrator (Airflow / Dagster) for cross-pipeline dependencies, or stay fully on Databricks Workflows?
+- Silver carries conformance, not just cleansing. Gold is marts, not integration.
+- Orchestration lives in a Databricks Workflow DAG. Triggers fire the top of the DAG; intra-pipeline ordering is enforced by task dependencies, not by trigger fan-out.
