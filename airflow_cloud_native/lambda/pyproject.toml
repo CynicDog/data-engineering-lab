@@ -1,0 +1,28 @@
+[project]
+name = "lambda-pipeline"
+version = "0.1.0"
+description = "Lambda-architecture pipeline orchestrated by Airflow 3 (batch via Polars/Delta on MinIO + speed via Kafka consumer, merged in Postgres)."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "polars==1.18.0",
+    "pyarrow==18.1.0",
+    "deltalake==0.22.3",
+    "confluent-kafka==2.6.1",
+    "boto3==1.35.84",
+    "s3fs==2024.12.0",
+    "psycopg[binary]==3.2.3",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8",
+    "pytest>=8",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
