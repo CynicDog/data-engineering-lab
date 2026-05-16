@@ -1,0 +1,13 @@
+.env
+logs/
+source_data/
+.venv/
+__pycache__/
+*.pyc
+target/
+dbt_packages/
+.dbt/
+.duckdb
+.ruff_cache/
+.pytest_cache/
+.claude/

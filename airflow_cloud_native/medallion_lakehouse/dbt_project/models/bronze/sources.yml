@@ -1,0 +1,76 @@
+version: 2
+
+# Bronze isn't materialized by dbt — the ingest DAG writes raw Parquet directly.
+# We declare it here as `sources` so dbt models can `{{ source(...) }}` them
+# and so the lineage graph includes them.
+#
+# `meta.external_location` is the dbt-duckdb-specific hint — the adapter
+# rewrites `{{ source(...) }}` references to `read_parquet('<location>')` at
+# compile time, no on-run-start hook needed.
+
+sources:
+  - name: bronze
+    description: >
+      Raw, append-only Parquet partitions written by `bronze_dag`.
+      Hive-partitioned by ingest date so partial backfills are possible.
+    meta:
+      owner: "data-platform@example.com"
+      contains_pii: true
+    loader: airflow_ingest
+
+    # dbt's freshness check on the source — runs as `dbt source freshness`
+    # and fails the DAG if no new partition has landed within the SLA window.
+    freshness:
+      warn_after: { count: 6, period: hour }
+      error_after: { count: 24, period: hour }
+    loaded_at_field: ingest_ts
+
+    tables:
+      - name: orders
+        description: "Raw order events emitted by the order service."
+        meta:
+          external_location: "read_parquet('s3://{{ env_var('LAKE_BUCKET', 'lakehouse') }}/bronze/orders/**/*.parquet', hive_partitioning=1)"
+        columns:
+          - name: order_id
+            description: "Order UUID; not always unique across late-arriving retries."
+          - name: customer_id
+          - name: status
+            description: "Free-form status string from upstream — Silver normalizes this."
+          - name: amount
+          - name: event_ts
+          - name: ingest_ts
+            description: "Wall-clock time at the ingest task — used for freshness."
+
+      - name: customers
+        description: "Customer CDC dump."
+        meta:
+          external_location: "read_parquet('s3://{{ env_var('LAKE_BUCKET', 'lakehouse') }}/bronze/customers/**/*.parquet', hive_partitioning=1)"
+        columns:
+          - name: customer_id
+          - name: name
+          - name: country
+          - name: signed_up_at
+          - name: ingest_ts
+
+      - name: products
+        description: "Product catalog snapshot."
+        meta:
+          external_location: "read_parquet('s3://{{ env_var('LAKE_BUCKET', 'lakehouse') }}/bronze/products/**/*.parquet', hive_partitioning=1)"
+        columns:
+          - name: product_id
+          - name: name
+          - name: category
+          - name: list_price
+          - name: ingest_ts
+
+      - name: web_events
+        description: "Clickstream events from the marketing site."
+        meta:
+          external_location: "read_parquet('s3://{{ env_var('LAKE_BUCKET', 'lakehouse') }}/bronze/web_events/**/*.parquet', hive_partitioning=1)"
+        columns:
+          - name: event_id
+          - name: customer_id
+          - name: product_id
+          - name: action
+          - name: event_ts
+          - name: ingest_ts

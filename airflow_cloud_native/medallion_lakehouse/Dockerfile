@@ -11,7 +11,8 @@ RUN apt-get update \
 # Bring in `uv` as a single static binary from the official image.
 COPY --from=ghcr.io/astral-sh/uv:0.5.10 /uv /usr/local/bin/uv
 
-# Install runtime deps (the `image` optional-extra adds Airflow providers).
+# Install runtime deps (the `image` optional-extra adds Airflow providers
+# plus dbt-duckdb / dbt-core / duckdb — the dbt CLI lives in this image).
 # Target the airflow user's Python explicitly — /home/airflow/.local is a
 # venv-style isolated env, so `uv pip install --system` would write to a
 # different site-packages that the runtime never imports from.

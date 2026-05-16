@@ -1,0 +1,77 @@
+version: 2
+
+# The Silver-layer contract. Every column that downstream marts depend on
+# is documented and tested here. A failing test fails the DAG run — that's
+# what stops a broken column from reaching Gold.
+
+models:
+  - name: silver_orders
+    description: "One row per order, status-normalized, retries deduped."
+    columns:
+      - name: order_id
+        description: "Stable identifier across retries."
+        data_tests:
+          - not_null
+          - unique
+      - name: customer_id
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('silver_customers')
+              field: customer_id
+              # Warn rather than fail — we sometimes ingest orders before
+              # the customer CDC catches up.
+              config:
+                severity: warn
+      - name: status
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ["new", "paid", "shipped", "cancelled", "refunded", "unknown"]
+      - name: amount
+        data_tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+
+  - name: silver_customers
+    description: "Latest known customer record. No history (see README)."
+    columns:
+      - name: customer_id
+        data_tests:
+          - not_null
+          - unique
+      - name: country
+        data_tests:
+          - accepted_values:
+              values: ["US", "DE", "FR", "JP", "GB", "CA"]
+              config:
+                severity: warn
+
+  - name: silver_products
+    description: "Latest catalog snapshot per product_id."
+    columns:
+      - name: product_id
+        data_tests:
+          - not_null
+          - unique
+      - name: list_price
+        data_tests:
+          - not_null
+
+  - name: silver_web_events
+    description: "Typed and sessionized clickstream events."
+    columns:
+      - name: event_id
+        data_tests:
+          - not_null
+          - unique
+      - name: session_id
+        data_tests:
+          - not_null
+      - name: action
+        data_tests:
+          - accepted_values:
+              values: ["view", "click", "scroll", "purchase", "add_to_cart"]

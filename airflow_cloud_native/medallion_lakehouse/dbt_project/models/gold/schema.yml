@@ -1,0 +1,48 @@
+version: 2
+
+# Gold tests focus on *business* invariants — uniqueness of grain, ranges of
+# derived metrics. Schema-level checks are mostly done at Silver.
+
+models:
+  - name: gold_customer_metrics
+    description: "Per-customer view: revenue, recency, lifecycle stage."
+    columns:
+      - name: customer_id
+        data_tests:
+          - not_null
+          - unique
+      - name: lifecycle_stage
+        data_tests:
+          - accepted_values:
+              values: ["active", "dormant", "churned", "never_purchased"]
+      - name: lifetime_revenue
+        data_tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+
+  - name: gold_daily_revenue
+    description: "Order-day × product-category revenue rollup."
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [order_day, category]
+    columns:
+      - name: revenue
+        data_tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+
+  - name: gold_product_performance
+    description: "Per-product funnel: views → clicks → cart → purchase."
+    columns:
+      - name: product_id
+        data_tests:
+          - not_null
+          - unique
+      - name: view_to_purchase_rate
+        data_tests:
+          - dbt_utils.expression_is_true:
+              expression: "between 0 and 1"
+              config:
+                severity: warn

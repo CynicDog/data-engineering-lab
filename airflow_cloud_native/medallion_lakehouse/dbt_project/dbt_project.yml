@@ -1,0 +1,28 @@
+name: medallion
+version: "1.0.0"
+config-version: 2
+
+profile: medallion
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  medallion:
+    +materialized: external          # default: write Parquet to MinIO
+    +format: parquet
+    silver:
+      +tags: ["silver"]
+    gold:
+      +tags: ["gold"]
+# Per-model `location` is set inside each .sql via `{{ config(location=silver_location()) }}`
+# (see macros/medallion_paths.sql) — `{{ this.name }}` is only defined inside a
+# model's render context, so the project-level form fails to compile.
+
+vars:
+  lake_bucket: "{{ env_var('LAKE_BUCKET', 'lakehouse') }}"
