@@ -37,7 +37,6 @@ def main() -> None:
     rng = random.Random(args.seed)
     now = datetime.now(tz=timezone.utc)
 
-    # --- customers
     customers = []
     for cid in range(1, args.customers + 1):
         customers.append(
@@ -53,7 +52,6 @@ def main() -> None:
         w.writerow(["customer_id", "name", "country", "signed_up_at"])
         w.writerows(customers)
 
-    # --- products
     products = []
     for pid in range(1, args.products + 1):
         products.append(
@@ -69,7 +67,7 @@ def main() -> None:
         w.writerow(["product_id", "name", "category", "list_price"])
         w.writerows(products)
 
-    # --- orders (with a sprinkling of duplicate order_ids = retries)
+    # Orders include a 2% sprinkle of duplicate order_ids — simulates upstream retries.
     orders = []
     for _ in range(args.orders):
         cid = rng.choice(customers)[0]
@@ -101,7 +99,6 @@ def main() -> None:
         w.writerow(["order_id", "customer_id", "status", "amount", "event_ts"])
         w.writerows(orders + retries)
 
-    # --- web_events
     events = []
     customer_ids = [c[0] for c in customers]
     product_ids = [p[0] for p in products]
