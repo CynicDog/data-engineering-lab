@@ -146,4 +146,106 @@ instead of checking flag files). Keep Gold on Databricks Workflow.
 
 **Phase 4**: Remove legacy trigger code from Databricks notebooks.
 
+
+## Production Proposal
+
+### The Real Problem at Your Company
+
+Your Bronze, Silver, and Gold layers are each triggered by the presence of a file
+in ADLS. Bronze writes a `check` file → Silver polls for it → Silver writes a
+`gold_trigger.flag` → Gold listens for it. If any step fails silently (exception
+mid-notebook, partial write) the downstream layer never fires. You discover the
+problem when a stakeholder notices stale data in a Gold mart — and diagnosing it
+means starting a Job Cluster to `ls` storage paths.
+
+Additionally, you have per-catalog Bronze workflows (MLCRP, MLVOC, MLIWT, MLSQP)
+with no documented reason for the separation. Silver needs to know all four are
+done before it processes. Gold needs Silver to be done. The signal for all of this
+is fragile files.
+
+### Solution: Databricks Workflows with Explicit Task Dependencies
+
+Databricks Workflows natively supports task-level dependencies. A Silver task
+can be configured to only run after a Bronze task succeeds — no files, no polling,
+no flag files. If Bronze fails, the Workflow stops and sends an alert.
+
+**Option A — Single multi-task Workflow per catalog:**
+```yaml
+resources:
+  jobs:
+    mlcrp_pipeline:
+      name: "MLCRP Daily Pipeline [${var.catalog}]"
+      tasks:
+        - task_key: bronze_customer
+          notebook_task:
+            notebook_path: ./notebooks/bronze_ingest
+            base_parameters: { table: customer, catalog: "${var.mlcrp_catalog}" }
+
+        - task_key: bronze_policy
+          notebook_task:
+            notebook_path: ./notebooks/bronze_ingest
+            base_parameters: { table: policy, catalog: "${var.mlcrp_catalog}" }
+
+        - task_key: silver_transform
+          depends_on:
+            - task_key: bronze_customer
+            - task_key: bronze_policy
+          notebook_task:
+            notebook_path: ./notebooks/silver_transform
+            base_parameters: { catalog: "${var.mlcrp_catalog}" }
+
+        - task_key: gold_mart
+          depends_on:
+            - task_key: silver_transform
+          notebook_task:
+            notebook_path: ./notebooks/gold_mart
+            base_parameters: { catalog: "${var.mlcrp_catalog}" }
+```
+
+`silver_transform` only starts when BOTH `bronze_customer` and `bronze_policy`
+succeed. `gold_mart` only starts when `silver_transform` succeeds. No flag files.
+Failure at any task stops the chain and alerts immediately.
+
+**Option B — Cross-catalog coordination via Workflow trigger:**
+If your catalogs run independently and on different schedules, keep per-catalog
+Workflows for Bronze. Use a **coordinator Workflow** that uses the
+`Run Job` task type to fan out and then converge:
+
+```
+coordinator_workflow
+├── run_job: mlcrp_bronze_workflow    ─┐
+├── run_job: mlvoc_bronze_workflow     ├─ fan out (parallel)
+├── run_job: mliwt_bronze_workflow     │
+└── run_job: mlsqp_bronze_workflow    ─┘
+    ↓ (all succeed)
+run_job: silver_workflow
+    ↓
+run_job: gold_workflow
+```
+
+No flag files. Databricks Workflows tracks completion state natively.
+
+### Layer Contracts — Enforce, Not Hope
+
+| Layer | Owns | Does NOT own |
+|---|---|---|
+| Bronze | Raw parquet → Delta; `_ingest_ts`, `_dt` partition; audit log row | Deduplication, type casting, PII masking |
+| Silver | Dedup by PK; correct types; mask PII (RRN 7자리, 전화 중간 4자리); `_silver_updated_at` | Cross-table joins, business aggregations |
+| Gold | Cross-table joins; KPI aggregations; mart queries | Raw column access, PII exposure, data quality fixes |
+
+These contracts mean: when Gold breaks, you look in Gold. When a PII leak is found,
+you look in Silver. You never have to traverse all three layers to understand
+whose problem it is.
+
+### Why This Is Better for Your Company
+
+- **No file hunting**: Workflow run history shows pass/fail per task with log links.
+  Check from any browser — no cluster startup, no ADLS explorer.
+- **Alerting**: Configure email/webhook notifications on Workflow failure. First
+  failure in Bronze triggers an alert before Silver even attempts to run.
+- **Retry logic**: Per-task retry count and retry interval in Workflow config.
+  Transient ADF latency → Bronze task retries automatically, no manual intervention.
+- **Audit**: Databricks Workflows persists run history. "What ran on Tuesday at 03:00
+  and why did it fail?" is a click in the Workflows UI, not an incident investigation.
+
 This gives you a safe rollback at each phase.

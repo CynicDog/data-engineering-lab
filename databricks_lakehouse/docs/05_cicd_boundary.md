@@ -157,3 +157,132 @@ The key is to deploy Databricks assets (notebooks, jobs, libraries) via
 Azure DevOps pipelines keyed to branches, not to manually manage them.
 Use `databricks bundle deploy` (Databricks Asset Bundles) or Terraform
 to make deployments reproducible.
+
+
+## Production Proposal
+
+### The Real Problem at Your Company
+
+To enable a paused production pipeline, you currently need to:
+- Create an ESM story
+- Create a feature branch
+- Make a code change (or fake one)
+- PR → development → DEV pipeline
+- PR → release → TEST-CI/CD → UAT team (days of waiting)
+- Team leader approval
+- PROD pipeline
+- PR → master
+
+This is the full lifecycle for flipping a `pause_status` from `PAUSED` to `UNPAUSED`.
+This is not a governance problem. This is a categorization problem.
+
+### The Argument to Raise with ESM / Compliance
+
+The core distinction you need your compliance team to accept:
+
+> A **deploy-time change** modifies the artifact — the code, the schema, the logic.
+> It requires review and approval because it changes what the system does.
+>
+> A **run-time control** operates the artifact — starting it, stopping it,
+> triggering a backfill. It does not change what the system does.
+> It is equivalent to a DBA restarting a database service or an operator
+> opening a pipeline valve. It is governed by role, not by approval cycle.
+
+Present this table to your team leader and the ESM / compliance stakeholders:
+
+| Action | Class | Proposed Path |
+|---|---|---|
+| New notebook logic | Deploy-time | ESM — no change |
+| SQL query change in mart | Deploy-time | ESM — no change |
+| New Delta table schema | Deploy-time | ESM — no change |
+| New ADF pipeline activity | Deploy-time | ESM — no change |
+| Unpause a deployed job | Run-time | Databricks Jobs API — operator action |
+| Trigger a backfill run | Run-time | Databricks Jobs API — operator action |
+| Re-queue a FAILED ingestion row | Run-time | SQL UPDATE on ingestion_log — operator action |
+| Change cluster auto-terminate setting | Run-time | Databricks UI / API — cloud admin action |
+| Add a new cluster to a pool | Infrastructure | Cloud admin action — separate from ESM scope |
+
+**Your talking point:**
+> "We are not asking to bypass ESM for code changes. We are asking to define
+> a separate operational procedure for runtime control of already-approved
+> deployed artifacts. Every operational action will be logged by Databricks
+> audit logs — timestamp, actor, action — which is better traceability than
+> ESM approvals, which only record that approval happened, not what was
+> actually done."
+
+### Implementation
+
+**Deploy all Databricks Jobs as PAUSED by default via DABs:**
+```yaml
+resources:
+  jobs:
+    bronze_ingest:
+      schedule:
+        quartz_cron_expression: "0 0 2 * * ?"
+        timezone_id: "Asia/Seoul"
+        pause_status: PAUSED
+```
+
+The job is deployed through the full ESM cycle, arrives in PROD as `PAUSED`.
+No data runs until an operator explicitly unpauses it. This satisfies the
+compliance requirement that "nothing happens in PROD without approval" —
+the deployment (code) was approved; the operator then opens the valve.
+
+**Operator unpause (no ESM, logged by Databricks audit):**
+```bash
+databricks jobs update --json '{
+  "job_id": 12345,
+  "new_settings": {
+    "schedule": { "pause_status": "UNPAUSED" }
+  }
+}'
+```
+
+Or via the Databricks UI: Jobs → select job → Edit schedule → Unpause.
+Both actions appear in the Databricks audit log under `jobs.update`.
+
+**Backfill trigger (no ESM, operational action):**
+```bash
+databricks jobs run-now \
+  --job-id 12345 \
+  --job-parameters '{"dt": "2024-03-01", "schedule_type": "DAILY"}'
+```
+
+### Mapping to Your Git Branch Policy
+
+The DABs targets map directly to your two-environment structure:
+
+```yaml
+targets:
+  dev:
+    workspace:
+      host: https://adb-dev-xxxx.azuredatabricks.net
+    mode: development
+    variables:
+      voc_catalog: VOCD
+
+  prod:
+    workspace:
+      host: https://adb-prod-yyyy.azuredatabricks.net
+    mode: production
+    variables:
+      voc_catalog: VOCP
+```
+
+AzDevOps pipeline for `development` branch deploys `--target dev`.
+AzDevOps pipeline for `release` branch deploys `--target prod`.
+The `master` branch remains read-only — no deploy target needed.
+
+### Operations Runbook (Present to Compliance as Evidence)
+
+Create a short Operations Runbook (separate from ESM, owned by data engineering):
+
+1. **Unpause a production job** — who is authorized (data engineering team), how
+   (Databricks Jobs API or UI), what is logged (Databricks audit log), who reviews
+   (team leader weekly audit of run-time actions)
+2. **Trigger a backfill** — same authorization model, parameters documented
+3. **Re-queue a failed ingestion** — SQL UPDATE on `ingestion_log`, documented
+4. **Emergency pipeline halt** — `pause_status: PAUSED` via API, escalation path
+
+This runbook demonstrates that run-time operations are governed — just not by
+the ESM cycle designed for code deployments.

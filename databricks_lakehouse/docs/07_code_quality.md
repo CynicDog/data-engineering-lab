@@ -177,3 +177,121 @@ w = Window.partitionBy("customer_id").orderBy(col("_ingest_ts").desc())
 
 The test for "is this comment worth keeping?": if you remove it, would a
 senior engineer be confused? If yes, keep it. If no, delete it.
+
+
+## Production Proposal
+
+### The Real Problem at Your Company
+
+All production pipeline logic lives in Databricks notebooks. No `pytest`. No
+`ruff`. No package structure. Multiple assignment without justification.
+`df2 = df` everywhere. Side effects and logic interleaved in every cell.
+Hardcoded catalog names, date strings, ADLS paths. No test means every change
+is a leap of faith. No linter means every code review is a style argument.
+ESM makes every change expensive — and when tests are missing, bugs in ESM-gated
+changes are discovered only in production.
+
+### Solution: Python Wheel + AzDevOps CI + Thin Notebooks
+
+The `src/lakehouse/` package in this lab is the production-ready pattern.
+The goal is to deploy it as a Python wheel to Databricks cluster libraries,
+so notebooks become thin orchestration shells calling well-tested functions.
+
+**Package structure (same as lab):**
+```
+src/lakehouse/
+├── config/settings.py    ← Settings.from_widgets(dbutils)
+├── bronze/
+│   ├── ingest.py         ← ingest_table(spark, settings, table, dt) → int
+│   └── audit.py          ← write_audit(), get_pending_tables()
+├── silver/transform.py   ← pure DataFrame transforms, no Spark session required in unit tests
+├── gold/mart.py          ← aggregation functions over Silver tables
+└── spark_utils/session.py
+```
+
+**Thin notebook (all you need in Databricks):**
+```python
+# Cell 1: install the wheel (deployed by DABs to the cluster library)
+# %pip install /Volumes/VOCD/libraries/lakehouse-0.1.0-py3-none-any.whl
+# (Or configure as cluster library in databricks.yml — preferred)
+
+# Cell 2: run
+from lakehouse.bronze.ingest import ingest_table
+from lakehouse.config.settings import Settings
+
+settings = Settings.from_widgets(dbutils)
+count = ingest_table(spark, settings, table="customer", dt=dbutils.widgets.get("dt"))
+print(f"Ingested {count} rows")
+```
+
+No business logic in the notebook. The notebook is a launch pad.
+
+### AzDevOps Pipeline Steps
+
+Replace the current (likely absent) quality gates with this pipeline, added to
+your existing DEV/TEST/PROD AzDevOps pipelines:
+
+```yaml
+steps:
+  - script: uv sync
+    displayName: Install dependencies
+
+  - script: uv run ruff format --check src/ dags/ tests/
+    displayName: Format check (ruff)
+
+  - script: uv run ruff check src/ dags/ tests/
+    displayName: Lint check (ruff)
+
+  - script: uv run pytest tests/ -v --tb=short
+    displayName: Unit tests (pytest)
+
+  - script: uv build
+    displayName: Build wheel
+
+  - script: databricks bundle deploy --target $(DATABRICKS_TARGET)
+    displayName: Deploy bundle
+    env:
+      DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
+      DATABRICKS_TARGET: dev   # or prod for release branch
+```
+
+This runs on every PR merge to `development` or `release`. A lint error or
+failing test blocks the AzDevOps pipeline — which blocks the ESM cycle.
+You find problems before they reach UAT, not after.
+
+### Incremental Migration Plan
+
+Do not rewrite everything at once. The ESM cycle is expensive — a big-bang
+rewrite requires one giant ESM ticket and creates maximum risk. Instead:
+
+**Sprint 1**: Extract Silver transforms (highest pain, most logic, most duplication)
+into `src/lakehouse/silver/transform.py`. Write unit tests. Deploy the wheel.
+Update the Silver notebook to `from lakehouse.silver.transform import *; run_silver(...)`.
+
+**Sprint 2**: Extract Bronze ingest logic. Wire to `ingestion_log` Delta table
+(see `03_ingestion_pipeline.md`). Tests cover both happy path and FAILED row handling.
+
+**Sprint 3**: Extract Gold mart queries. Each mart becomes a named function in
+`src/lakehouse/gold/mart.py`. Tests verify mart output shape and key column presence.
+
+**Sprint 4**: Add `ruff check` + `pytest` to the AzDevOps pipeline as a quality gate.
+
+After Sprint 4 the migration is complete. The notebook is a thin shell.
+All logic is tested. All code is linted. The ESM cycle now catches real problems
+earlier — not because the process changed, but because tests run before UAT.
+
+### Functional vs Side-Effect Boundary — Applied to Your Stack
+
+| Function type | Example | Where | Testable without Databricks? |
+|---|---|---|---|
+| Pure transform | `mask_rrn(df)`, `dedup_by_latest(df, pk)` | `src/lakehouse/silver/transform.py` | Yes — `spark.createDataFrame()` in pytest |
+| Side-effectful I/O | `read_parquet(spark, path)`, `write_delta(df, table)` | `src/lakehouse/bronze/ingest.py` | Mock or integration test only |
+| Orchestration | calls ingest + writes audit row | Notebook cell or DAG task | E2E test only |
+
+The rule: if a function reads or writes anything external, it is side-effectful.
+Everything else should be pure. Pure functions are unit-testable in 30 seconds.
+Side-effectful functions are integration-testable in the container. Orchestration
+is E2E-testable by running the full DAG or Workflow.
+
+This boundary is not a style preference — it determines whether you can run
+`pytest` in the AzDevOps pipeline without connecting to a live Databricks cluster.

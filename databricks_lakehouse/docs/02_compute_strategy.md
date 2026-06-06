@@ -94,3 +94,81 @@ spark = SparkSession.getActiveSession()
 4. **Redesign high-frequency small jobs** to be batched. A job that runs every 15 minutes should probably run hourly with Structured Streaming or micro-batch instead.
 
 5. **Document the compute model in your runbook**: which pipelines use which compute type, what the expected start time is, and who is responsible for monitoring zombie clusters.
+
+
+## Production Proposal
+
+### The Real Problem at Your Company
+
+You have two Azure Databricks workspaces (DEV and PROD, separate subscriptions).
+Serverless compute is blocked by 망분리 — no SaaS endpoint can reach outside the
+corporate network boundary. Every Job Cluster spins cold Azure VMs: 6-7 minutes.
+As a cloud administrator, you're also watching VMs appear, linger, and disappear
+at random, with no predictable cost pattern and no easy way to explain it to
+finance or your team leader.
+
+The lab solution (always-on Spark in an Airflow container) teaches you the principle:
+pre-provisioned compute beats cold-start compute every time. The production answer
+is **Databricks Cluster Pools**.
+
+### Solution: Cluster Pools
+
+A Cluster Pool is a set of pre-warmed Azure VMs sitting idle, managed by Databricks.
+When a Job Cluster or All-Purpose Cluster is configured to use the pool, it grabs an
+idle VM instead of provisioning from scratch. Cold start drops from 6-7 minutes to
+roughly 30-90 seconds.
+
+Pool VMs are idle — they are not running Spark, not running a driver, not billing
+DBU. They are just reserved Azure VMs. As a cloud admin, this is a clean mental model:
+one pool with a defined minimum and maximum, instead of unpredictable VM churn.
+
+**Configure the pool in `databricks.yml` (Databricks Asset Bundles):**
+```yaml
+resources:
+  instance_pools:
+    batch_pool:
+      instance_pool_name: insurance-batch-pool
+      node_type_id: Standard_DS3_v2
+      min_idle_instances: 1
+      max_capacity: 8
+      idle_instance_autotermination_minutes: 20
+```
+
+**Attach a Job Cluster to the pool:**
+```yaml
+resources:
+  jobs:
+    bronze_ingest:
+      job_clusters:
+        - job_cluster_key: bronze_cluster
+          new_cluster:
+            instance_pool_id: ${resources.instance_pools.batch_pool.id}
+            spark_version: 15.4.x-scala2.12
+            num_workers: 2
+```
+
+### Workload Map for Your Environment
+
+| Workload | Compute | Cold Start | Notes |
+|---|---|---|---|
+| Interactive exploration (analyst) | All-Purpose Cluster attached to pool | ~60 sec (from pool) | Auto-terminate after 30 min idle |
+| Bronze/Silver/Gold batch ETL | Job Cluster attached to pool | ~60 sec (from pool) | Pool has min 1 idle VM |
+| Ad-hoc debugging | Same All-Purpose Cluster | 0 sec (already warm) | Don't spin a new cluster to debug |
+| SQL analytics (if not blocked) | Classic SQL Warehouse | 2-3 min | Not serverless — dedicated VM |
+
+### What to Tell the Cloud Team
+
+Cluster Pools are not always-running compute — they are a VM reservation with
+auto-release. The cost model is: pool idle instances are billed at VM rate only
+(no Databricks DBU). This is significantly cheaper than a running All-Purpose Cluster.
+Present pool cost (VM reservation) vs. current cost (ad-hoc VMs + 7-min idle time
+during startup) to make the financial argument.
+
+### As Cloud Administrator
+
+Define pool lifecycle in your governance runbook:
+- DEV pool: min 1 idle, max 4, auto-terminates idle instances after 20 min
+- PROD pool: min 2 idle (SLA on start time), max 10, monitored via Azure Monitor
+- Tag all pool VMs with `project=data-platform`, `env=dev|prod` for cost attribution
+- Set up an Azure Cost Management budget alert on the tag — the first signal that
+  a pool is misconfigured and holding too many idle VMs

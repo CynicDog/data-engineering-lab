@@ -2,14 +2,18 @@
 
 A structured breakdown of the six pain points and the patterns that address each one.
 
-| # | Pain Point | Root Cause | Pattern in This Lab | Deep Dive |
-|---|-----------|------------|---------------------|-----------|
-| 1 | Compute cold start (6–7 min) | Per-job VM provisioning, no warm pool | Always-on Spark inside Airflow container | [02_compute_strategy.md](02_compute_strategy.md) |
-| 2 | Fragile ADF→Bronze pipeline | File-based IPC (status.txt); daily/hourly overlap | Delta audit table replaces status file | [03_ingestion_pipeline.md](03_ingestion_pipeline.md) |
-| 3 | Unclear medallion responsibilities | No deliberate layer contract; file-based triggers | Airflow Asset graph; clear Bronze/Silver/Gold contract | [04_medallion_design.md](04_medallion_design.md) |
-| 4 | CI/CD ESM mismatch | No distinction between deploy-time and run-time control | API-driven operational control; feature flags in Delta | [05_cicd_boundary.md](05_cicd_boundary.md) |
-| 5 | VOCP/VOCD catalog naming chaos | No config abstraction; env branching in source code | Profile-based `Settings` dataclass | [06_environment_management.md](06_environment_management.md) |
-| 6 | Notebook-first, no code quality | Cultural gap; no tooling for test/lint/format | Python package + uv + ruff + pytest | [07_code_quality.md](07_code_quality.md) |
+Each doc has two halves:
+- **Lab Solution** — how the pattern is demonstrated locally using Airflow + PySpark + MinIO. This is where you feel the pattern on your skin.
+- **Production Proposal** — how to apply the same pattern to the real Azure Databricks environment at the company, respecting 망분리, ESM, VOCP/VOCD naming, and two-subscription constraints.
+
+| # | Pain Point | Root Cause | Lab Solution | Production Proposal | Deep Dive |
+|---|-----------|------------|--------------|---------------------|-----------|
+| 1 | Compute cold start (6–7 min) | Per-job VM provisioning, no warm pool | Always-on Spark inside Airflow container | Databricks Cluster Pool — pre-warm VMs, Job Clusters attach in ~60 sec | [02_compute_strategy.md](02_compute_strategy.md) |
+| 2 | Fragile ADF→Bronze pipeline | File-based IPC (status.txt); daily/hourly overlap | Delta audit table replaces status file | ADF writes rows to UC ingestion_log Delta table; Databricks reads with SQL WHERE | [03_ingestion_pipeline.md](03_ingestion_pipeline.md) |
+| 3 | Unclear medallion responsibilities | No deliberate layer contract; file-based triggers | Airflow Asset graph; clear Bronze/Silver/Gold contract | Databricks Workflows with explicit task dependencies — no flag files | [04_medallion_design.md](04_medallion_design.md) |
+| 4 | CI/CD ESM mismatch | No distinction between deploy-time and run-time control | API-driven operational control; feature flags in Delta | Deploy-time vs run-time boundary argument; Jobs API for operational state | [05_cicd_boundary.md](05_cicd_boundary.md) |
+| 5 | VOCP/VOCD catalog naming chaos | No config abstraction; env branching in source code | Profile-based `Settings` dataclass | DABs variable substitution — catalog name injected as job parameter, zero code branching | [06_environment_management.md](06_environment_management.md) |
+| 6 | Notebook-first, no code quality | Cultural gap; no tooling for test/lint/format | Python package + uv + ruff + pytest | Wheel deployed via DABs; AzDevOps pipeline runs lint+test+build; thin notebooks | [07_code_quality.md](07_code_quality.md) |
 
 
 ## Pain Point 1 — Compute Cold Start
