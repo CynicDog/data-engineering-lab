@@ -1,0 +1,12 @@
+# Production profile — mirrors Databricks PROD workspace (VOCP catalog)
+# Sensitive values must be provided via environment variables; placeholders here
+# show the shape of the config only.
+env: prod
+catalog: VOCP
+
+lake_bucket: lakehouse
+s3_endpoint: http://minio:9000
+s3_access_key: minioadmin
+s3_secret_key: minioadmin
+
+ods_url: postgresql+psycopg2://ods:ods@postgres:5432/ods

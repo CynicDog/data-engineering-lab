@@ -1,0 +1,11 @@
+# Development profile — mirrors Databricks DEV workspace (VOCD catalog)
+env: dev
+catalog: VOCD
+
+lake_bucket: lakehouse
+# When running notebooks locally, override with localhost:9030
+s3_endpoint: http://minio:9000
+s3_access_key: minioadmin
+s3_secret_key: minioadmin
+
+ods_url: postgresql+psycopg2://ods:ods@postgres:5432/ods
