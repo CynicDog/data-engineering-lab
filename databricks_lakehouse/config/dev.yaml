@@ -1,6 +1,10 @@
-# Development profile — mirrors Databricks DEV workspace (VOCD catalog)
+# Development profile — mirrors Databricks DEV workspace (CHAN*D catalogs)
 env: dev
-catalog: VOCD
+catalogs:
+  chan1: CHAN1D
+  chan2: CHAN2D
+  chan3: CHAN3D
+  chan4: CHAN4D
 
 lake_bucket: lakehouse
 # When running notebooks locally, override with localhost:9030

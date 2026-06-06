@@ -1,8 +1,12 @@
-# Production profile — mirrors Databricks PROD workspace (VOCP catalog)
+# Production profile — mirrors Databricks PROD workspace (CHAN*P catalogs)
 # Sensitive values must be provided via environment variables; placeholders here
 # show the shape of the config only.
 env: prod
-catalog: VOCP
+catalogs:
+  chan1: CHAN1P
+  chan2: CHAN2P
+  chan3: CHAN3P
+  chan4: CHAN4P
 
 lake_bucket: lakehouse
 s3_endpoint: http://minio:9000

@@ -1,6 +1,6 @@
 """Tests for silver/transform.py.
 
-Focus on the key invariants: dedup, PII masking, type casting.
+Focus on the key invariants: dedup, PII masking, type casting, derived columns.
 No Airflow, no network — pure PySpark + Delta on tmp_path.
 """
 
@@ -70,71 +70,134 @@ class TestMaskPhone:
         assert result == "010-****-5678"
 
 
-class TestTransformCustomer:
-    def test_produces_required_columns(self, spark):
-        from lakehouse.silver.transform import transform_customer
-        from pyspark.sql.types import DoubleType, StringType, StructField, StructType, TimestampType
+class TestTransformFromSpec:
+    def _make_customer_spec(self):
+        from lakehouse.config.registry import TableSpec
 
+        return TableSpec(
+            name="customer",
+            channel="chan1",
+            pk="customer_id",
+            dedup_ts_col="_ingest_ts",
+            schedule_type="daily",
+            cast_types={"birth_date": "date", "created_at": "timestamp"},
+            pii={"rrn_masked": "mask_rrn", "phone_masked": "mask_phone"},
+            derived_columns={},
+        )
+
+    def test_pii_masking_applied(self, spark):
+        from lakehouse.silver.transform import transform_from_spec
+
+        spec = self._make_customer_spec()
         schema = StructType([
             StructField("customer_id", StringType()),
             StructField("name", StringType()),
             StructField("birth_date", StringType()),
-            StructField("gender", StringType()),
-            StructField("channel", StringType()),
             StructField("rrn_masked", StringType()),
             StructField("phone_masked", StringType()),
-            StructField("email", StringType()),
             StructField("created_at", TimestampType()),
-            StructField("updated_at", TimestampType()),
             StructField("_ingest_ts", TimestampType()),
             StructField("_dt", StringType()),
         ])
         rows = [Row(
-            customer_id="C001", name="Kim", birth_date="1990-01-01",
-            gender="M", channel="온라인", rrn_masked="900101-1234567",
-            phone_masked="010-1234-5678", email="kim@test.com",
-            created_at=datetime(2024, 1, 1), updated_at=datetime(2024, 1, 1),
-            _ingest_ts=datetime(2024, 1, 15, 10, 0), _dt="2024-01-15",
+            customer_id="C001", name="Kim",
+            birth_date="1990-01-01",
+            rrn_masked="900101-1234567",
+            phone_masked="010-1234-5678",
+            created_at=datetime(2024, 1, 1),
+            _ingest_ts=datetime(2024, 1, 15, 10, 0),
+            _dt="2024-01-15",
         )]
         df = spark.createDataFrame(rows, schema=schema)
-        result = transform_customer(df)
+        result = transform_from_spec(df, spec)
 
-        # RRN must be masked
-        assert result.first()["rrn_masked"] == "900101-*******"
-        # Phone must be masked
-        assert result.first()["phone_masked"] == "010-****-5678"
+        row = result.first()
+        assert row["rrn_masked"] == "900101-*******"
+        assert row["phone_masked"] == "010-****-5678"
 
+    def test_dedup_keeps_latest(self, spark):
+        from lakehouse.silver.transform import transform_from_spec
 
-class TestTransformClaims:
-    def test_computes_processing_days(self, spark):
-        from lakehouse.silver.transform import transform_claims
+        spec = self._make_customer_spec()
+        rows = [
+            ("C001", "Old Name", "900101-*******", "010-****-5678",
+             datetime(2024, 1, 1), datetime(2024, 1, 1, 9, 0), "2024-01-15"),
+            ("C001", "New Name", "900101-*******", "010-****-5678",
+             datetime(2024, 1, 1), datetime(2024, 1, 1, 10, 0), "2024-01-15"),
+        ]
+        df = spark.createDataFrame(
+            rows,
+            ["customer_id", "name", "rrn_masked", "phone_masked",
+             "created_at", "_ingest_ts", "_dt"],
+        )
+        result = transform_from_spec(df, spec)
+        assert result.count() == 1
+        assert result.first()["name"] == "New Name"
 
-        schema = StructType([
-            StructField("claim_id", StringType()),
-            StructField("policy_id", StringType()),
-            StructField("customer_id", StringType()),
-            StructField("claim_date", DateType()),
-            StructField("claim_amount", DoubleType()),
-            StructField("settled_amount", DoubleType()),
-            StructField("status", StringType()),
-            StructField("claim_type", StringType()),
-            StructField("processed_at", TimestampType()),
-            StructField("created_at", TimestampType()),
-            StructField("updated_at", TimestampType()),
-            StructField("_ingest_ts", TimestampType()),
-            StructField("_dt", StringType()),
-        ])
+    def test_derived_column_policy_age(self, spark):
+        from lakehouse.config.registry import TableSpec
+        from lakehouse.silver.transform import transform_from_spec
+
+        spec = TableSpec(
+            name="policy",
+            channel="chan1",
+            pk="policy_id",
+            dedup_ts_col="_ingest_ts",
+            schedule_type="daily",
+            cast_types={"start_date": "date", "end_date": "date"},
+            pii={},
+            derived_columns={"policy_age_days": "datediff(coalesce(end_date, current_date()), start_date)"},
+        )
         from datetime import date
         rows = [Row(
-            claim_id="CL001", policy_id="P001", customer_id="C001",
-            claim_date=date(2024, 1, 1),
-            claim_amount=1000000.0, settled_amount=900000.0,
-            status="지급완료", claim_type="입원",
-            processed_at=datetime(2024, 1, 6),
-            created_at=datetime(2024, 1, 1), updated_at=datetime(2024, 1, 6),
-            _ingest_ts=datetime(2024, 1, 15, 10, 0), _dt="2024-01-15",
+            policy_id="P001",
+            start_date=date(2020, 1, 1),
+            end_date=date(2021, 1, 1),
+            _ingest_ts=datetime(2024, 1, 15),
+            _dt="2024-01-15",
         )]
+        schema = StructType([
+            StructField("policy_id", StringType()),
+            StructField("start_date", DateType()),
+            StructField("end_date", DateType()),
+            StructField("_ingest_ts", TimestampType()),
+            StructField("_dt", StringType()),
+        ])
         df = spark.createDataFrame(rows, schema=schema)
-        result = transform_claims(df)
+        result = transform_from_spec(df, spec)
+        assert result.first()["policy_age_days"] == 366
 
+    def test_derived_column_processing_days(self, spark):
+        from lakehouse.config.registry import TableSpec
+        from lakehouse.silver.transform import transform_from_spec
+
+        spec = TableSpec(
+            name="claims",
+            channel="chan1",
+            pk="claim_id",
+            dedup_ts_col="_ingest_ts",
+            schedule_type="daily",
+            cast_types={"claim_date": "date", "processed_at": "timestamp"},
+            pii={},
+            derived_columns={
+                "processing_days": "CASE WHEN processed_at IS NOT NULL THEN datediff(cast(processed_at AS date), claim_date) END"
+            },
+        )
+        from datetime import date
+        rows = [Row(
+            claim_id="CL001",
+            claim_date=date(2024, 1, 1),
+            processed_at=datetime(2024, 1, 6),
+            _ingest_ts=datetime(2024, 1, 15),
+            _dt="2024-01-15",
+        )]
+        schema = StructType([
+            StructField("claim_id", StringType()),
+            StructField("claim_date", DateType()),
+            StructField("processed_at", TimestampType()),
+            StructField("_ingest_ts", TimestampType()),
+            StructField("_dt", StringType()),
+        ])
+        df = spark.createDataFrame(rows, schema=schema)
+        result = transform_from_spec(df, spec)
         assert result.first()["processing_days"] == 5

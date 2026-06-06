@@ -2,12 +2,12 @@
 
 Instead of branching on environment inside source code:
     if env == "prod":
-        catalog = "VOCP"
+        catalog = "CHAN1P"
     else:
-        catalog = "VOCD"
+        catalog = "CHAN1D"
 
-Inject the catalog name (and everything else) via a profile config file.
-All code references `settings.catalog`, never a hardcoded string.
+Inject all catalog names (and everything else) via a profile config file.
+All code references `settings.catalog_for("chan1")`, never a hardcoded string.
 """
 
 from __future__ import annotations
@@ -24,21 +24,25 @@ _REPO_ROOT = Path(__file__).parents[3]  # .../databricks_lakehouse/
 @dataclass(frozen=True)
 class Settings:
     env: str
-    catalog: str  # "VOCD" in dev, "VOCP" in prod — injected, never hardcoded
+    catalogs: dict[str, str]  # logical channel name → UC catalog name
     lake_bucket: str
     s3_endpoint: str
     s3_access_key: str
     s3_secret_key: str
     ods_url: str
 
-    def landing_path(self, table: str, dt: str) -> str:
-        return f"s3a://{self.lake_bucket}/landing/{table}/dt={dt}"
+    def catalog_for(self, channel: str) -> str:
+        """Return the Unity Catalog name for a logical channel (e.g. 'chan1' → 'CHAN1D')."""
+        return self.catalogs[channel]
 
-    def bronze_path(self, table: str) -> str:
-        return f"s3a://{self.lake_bucket}/bronze/{table}"
+    def landing_path(self, channel: str, table: str, dt: str) -> str:
+        return f"s3a://{self.lake_bucket}/landing/{channel}/{table}/dt={dt}"
 
-    def silver_path(self, table: str) -> str:
-        return f"s3a://{self.lake_bucket}/silver/{table}"
+    def bronze_path(self, channel: str, table: str) -> str:
+        return f"s3a://{self.lake_bucket}/bronze/{channel}/{table}"
+
+    def silver_path(self, channel: str, table: str) -> str:
+        return f"s3a://{self.lake_bucket}/silver/{channel}/{table}"
 
     def gold_path(self, mart: str) -> str:
         return f"s3a://{self.lake_bucket}/gold/{mart}"
@@ -79,7 +83,7 @@ def load_settings(profile: str | None = None) -> Settings:
 
     return Settings(
         env=data["env"],
-        catalog=data["catalog"],
+        catalogs=data["catalogs"],
         lake_bucket=os.environ.get("LAKE_BUCKET", data["lake_bucket"]),
         s3_endpoint=os.environ.get("LAKE_S3_ENDPOINT", data["s3_endpoint"]),
         s3_access_key=os.environ.get("LAKE_S3_ACCESS_KEY", data["s3_access_key"]),

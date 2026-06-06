@@ -15,6 +15,10 @@ Why this boundary matters:
     When Gold breaks (it will), you can fix Gold without re-running the
     expensive Bronze ingestion. Silver is a stable contract between the
     raw data world and the analytical world.
+
+Config-driven engine:
+    All table-specific logic (casts, PII columns, PK, derived columns) lives in
+    config/table_registry.yaml. Adding a new table = one YAML block, no Python changes.
 """
 
 from __future__ import annotations
@@ -25,11 +29,9 @@ from pyspark.sql import Window
 from pyspark.sql import functions as F
 
 if TYPE_CHECKING:
+    from lakehouse.config.registry import TableSpec
     from lakehouse.config.settings import Settings
     from pyspark.sql import DataFrame, SparkSession
-
-TABLES = ["customer", "policy", "claims", "voc"]
-
 
 
 def dedup_by_latest(df: "DataFrame", pk: str, ts_col: str = "_ingest_ts") -> "DataFrame":
@@ -70,139 +72,51 @@ def mask_phone(df: "DataFrame", col_name: str = "phone_masked") -> "DataFrame":
     )
 
 
-
-def transform_customer(df: "DataFrame") -> "DataFrame":
-    return (
-        df.select(
-            F.col("customer_id").cast("string"),
-            F.col("name").cast("string"),
-            F.col("birth_date").cast("date"),
-            F.col("gender").cast("string"),
-            F.col("channel").cast("string"),
-            F.col("rrn_masked").cast("string"),
-            F.col("phone_masked").cast("string"),
-            F.col("email").cast("string"),
-            F.col("created_at").cast("timestamp"),
-            F.col("updated_at").cast("timestamp"),
-            F.col("_ingest_ts"),
-            F.col("_dt"),
-        )
-        .pipe(dedup_by_latest, pk="customer_id")
-        .pipe(mask_rrn)
-        .pipe(mask_phone)
-    )
-
-
-def transform_policy(df: "DataFrame") -> "DataFrame":
-    return (
-        df.select(
-            F.col("policy_id").cast("string"),
-            F.col("customer_id").cast("string"),
-            F.col("product_code").cast("string"),
-            F.col("product_name").cast("string"),
-            F.col("start_date").cast("date"),
-            F.col("end_date").cast("date"),
-            F.col("premium").cast("double"),
-            F.col("status").cast("string"),
-            F.col("created_at").cast("timestamp"),
-            F.col("updated_at").cast("timestamp"),
-            F.col("_ingest_ts"),
-            F.col("_dt"),
-        )
-        .pipe(dedup_by_latest, pk="policy_id")
-        .withColumn(
-            "policy_age_days",
-            F.datediff(F.coalesce(F.col("end_date"), F.current_date()), F.col("start_date")),
-        )
-    )
-
-
-def transform_claims(df: "DataFrame") -> "DataFrame":
-    return (
-        df.select(
-            F.col("claim_id").cast("string"),
-            F.col("policy_id").cast("string"),
-            F.col("customer_id").cast("string"),
-            F.col("claim_date").cast("date"),
-            F.col("claim_amount").cast("double"),
-            F.col("settled_amount").cast("double"),
-            F.col("status").cast("string"),
-            F.col("claim_type").cast("string"),
-            F.col("processed_at").cast("timestamp"),
-            F.col("created_at").cast("timestamp"),
-            F.col("updated_at").cast("timestamp"),
-            F.col("_ingest_ts"),
-            F.col("_dt"),
-        )
-        .pipe(dedup_by_latest, pk="claim_id")
-        .withColumn(
-            "processing_days",
-            F.when(
-                F.col("processed_at").isNotNull(),
-                F.datediff(F.col("processed_at").cast("date"), F.col("claim_date")),
-            ),
-        )
-    )
-
-
-def transform_voc(df: "DataFrame") -> "DataFrame":
-    return (
-        df.select(
-            F.col("voc_id").cast("string"),
-            F.col("customer_id").cast("string"),
-            F.col("complaint_type").cast("string"),
-            F.col("channel").cast("string"),
-            F.col("priority").cast("string"),
-            F.col("status").cast("string"),
-            F.col("created_at").cast("timestamp"),
-            F.col("resolved_at").cast("timestamp"),
-            F.col("_ingest_ts"),
-            F.col("_dt"),
-        )
-        .pipe(dedup_by_latest, pk="voc_id")
-        .withColumn(
-            "resolution_hours",
-            F.when(
-                F.col("resolved_at").isNotNull(),
-                (
-                    F.unix_timestamp(F.col("resolved_at"))
-                    - F.unix_timestamp(F.col("created_at"))
-                )
-                / 3600,
-            ),
-        )
-    )
-
-
-_TRANSFORMS = {
-    "customer": transform_customer,
-    "policy": transform_policy,
-    "claims": transform_claims,
-    "voc": transform_voc,
+_PII_MASKERS = {
+    "mask_rrn": mask_rrn,
+    "mask_phone": mask_phone,
 }
+
+
+def transform_from_spec(df: "DataFrame", spec: "TableSpec") -> "DataFrame":
+    """Generic Silver transform driven entirely by TableSpec config.
+
+    Order: cast → dedup → PII mask → derived columns.
+    Cast first so derived column SQL expressions see correctly typed inputs.
+    """
+    for col_name, type_str in spec.cast_types.items():
+        if col_name in df.columns:
+            df = df.withColumn(col_name, F.col(col_name).cast(type_str))
+
+    df = dedup_by_latest(df, pk=spec.pk, ts_col=spec.dedup_ts_col)
+
+    for col_name, masker_name in spec.pii.items():
+        if col_name in df.columns and masker_name in _PII_MASKERS:
+            df = _PII_MASKERS[masker_name](df, col_name=col_name)
+
+    for col_name, sql_expr in spec.derived_columns.items():
+        df = df.withColumn(col_name, F.expr(sql_expr))
+
+    return df
 
 
 def transform_table(
     spark: "SparkSession",
     settings: "Settings",
-    table: str,
+    spec: "TableSpec",
 ) -> int:
-    """Read from bronze Delta, transform, write to silver Delta.
+    """Read from bronze Delta, transform via spec, write to silver Delta.
 
     Returns the number of rows written.
     """
-    if table not in _TRANSFORMS:
-        raise ValueError(f"No transform defined for table: {table!r}")
-
-    bronze_df = spark.read.format("delta").load(settings.bronze_path(table))
-    silver_df = _TRANSFORMS[table](bronze_df)
-    silver_path = settings.silver_path(table)
+    bronze_df = spark.read.format("delta").load(settings.bronze_path(spec.channel, spec.name))
+    silver_df = transform_from_spec(bronze_df, spec)
 
     (
         silver_df.write.format("delta")
         .mode("overwrite")
         .option("overwriteSchema", "true")
-        .save(silver_path)
+        .save(settings.silver_path(spec.channel, spec.name))
     )
 
     return silver_df.count()

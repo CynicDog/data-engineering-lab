@@ -4,7 +4,7 @@ This is the Databricks pattern equivalent of:
     ADF writes Parquet to ADLS landing zone
     → Databricks reads it and writes a Delta table.
 
-The ingestion is idempotent per (table, dt): re-running for the same date
+The ingestion is idempotent per (channel, table, dt): re-running for the same date
 overwrites that partition only, leaving other partitions intact.
 """
 
@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 def ingest_table(
     spark: "SparkSession",
     settings: "Settings",
+    channel: str,
     table: str,
     dt: str,
 ) -> int:
@@ -31,15 +32,15 @@ def ingest_table(
 
     Returns the number of rows written.
 
-    Landing path: s3a://lakehouse/landing/{table}/dt={dt}/*.parquet
-    Bronze path:  s3a://lakehouse/bronze/{table}   (partitioned by _dt)
+    Landing path: s3a://lakehouse/landing/{channel}/{table}/dt={dt}/*.parquet
+    Bronze path:  s3a://lakehouse/bronze/{channel}/{table}   (partitioned by _dt)
 
     Why partition by _dt?
         Enables partition pruning on date filters and makes replaceWhere
         overwrites cheap — only the target date partition is rewritten.
     """
-    landing_path = f"{settings.landing_path(table, dt)}/*.parquet"
-    bronze_path = settings.bronze_path(table)
+    landing_path = f"{settings.landing_path(channel, table, dt)}/*.parquet"
+    bronze_path = settings.bronze_path(channel, table)
 
     df = (
         spark.read.parquet(landing_path)
@@ -63,6 +64,7 @@ def ingest_table(
 def ingest_table_with_audit(
     spark: "SparkSession",
     settings: "Settings",
+    channel: str,
     table: str,
     dt: str,
     schedule_type: str,
@@ -77,16 +79,16 @@ def ingest_table_with_audit(
 
     run_id = run_id or str(uuid.uuid4())
     audit_path = settings.control_path("ingestion_log")
-    landing_path = settings.landing_path(table, dt)
+    landing_path = settings.landing_path(channel, table, dt)
 
     try:
-        row_count = ingest_table(spark, settings, table, dt)
+        row_count = ingest_table(spark, settings, channel, table, dt)
         write_audit(
             spark,
             audit_path,
             {
                 "run_id": run_id,
-                "source_table": table,
+                "source_table": f"{channel}.{table}",
                 "landing_path": landing_path,
                 "schedule_type": schedule_type,
                 "dt": dt,
@@ -96,7 +98,7 @@ def ingest_table_with_audit(
                 "error_msg": None,
             },
         )
-        return {"table": table, "dt": dt, "rows": row_count, "status": "success"}
+        return {"channel": channel, "table": table, "dt": dt, "rows": row_count, "status": "success"}
 
     except Exception as exc:
         write_audit(
@@ -104,7 +106,7 @@ def ingest_table_with_audit(
             audit_path,
             {
                 "run_id": run_id,
-                "source_table": table,
+                "source_table": f"{channel}.{table}",
                 "landing_path": landing_path,
                 "schedule_type": schedule_type,
                 "dt": dt,

@@ -38,13 +38,13 @@ def fake_settings(tmp_path):
     base = str(tmp_path)
     return Settings(
         env="test",
-        catalog="TEST",
+        catalogs={"chan1": "CHAN1T", "chan2": "CHAN2T"},
         lake_bucket="test-bucket",
         s3_endpoint="",
         s3_access_key="",
         s3_secret_key="",
         ods_url="",
-    ), base  # Return both settings and the base path for overriding paths
+    ), base
 
 
 @pytest.fixture

@@ -49,6 +49,13 @@ ENDPOINT = os.environ.get("LAKE_S3_ENDPOINT", "http://localhost:9030")
 ACCESS_KEY = os.environ.get("LAKE_S3_ACCESS_KEY", "minioadmin")
 SECRET_KEY = os.environ.get("LAKE_S3_SECRET_KEY", "minioadmin")
 
+TABLE_CHANNELS = {
+    "customer": "chan1",
+    "policy": "chan1",
+    "claims": "chan1",
+    "voc": "chan2",
+}
+
 PRODUCT_CODES = ["LIFE", "HEALTH", "AUTO", "FIRE"]
 PRODUCT_NAMES = {
     "LIFE": "종신보험",
@@ -186,11 +193,12 @@ def generate_voc(customers_df: pd.DataFrame, base_date: date) -> pd.DataFrame:
 def write_parquet_to_minio(
     s3: Any,
     df: pd.DataFrame,
+    channel: str,
     table: str,
     dt: str,
     schedule_type: str = "daily",
 ) -> str:
-    key = f"landing/{table}/dt={dt}/part.parquet"
+    key = f"landing/{channel}/{table}/dt={dt}/part.parquet"
     buf = io.BytesIO()
     df.to_parquet(buf, index=False, engine="pyarrow")
     buf.seek(0)
@@ -239,8 +247,9 @@ def generate_for_date(
     }
 
     for table, df in tables.items():
-        path = write_parquet_to_minio(s3, df, table, dt_str, schedule_type)
-        print(f"  {table}: {len(df):,} rows → {path}")
+        channel = TABLE_CHANNELS[table]
+        path = write_parquet_to_minio(s3, df, channel, table, dt_str, schedule_type)
+        print(f"  {channel}/{table}: {len(df):,} rows → {path}")
 
     if write_status_txt:
         write_status_txt_antipattern(s3, list(tables.keys()), dt_str, schedule_type)

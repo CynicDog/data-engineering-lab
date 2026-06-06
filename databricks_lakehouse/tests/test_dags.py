@@ -31,11 +31,14 @@ def test_expected_dags_present(dagbag):
 
 
 class TestIngestBronze:
-    def test_has_one_task_per_table(self, dagbag):
+    def test_has_one_task_per_channel_table(self, dagbag):
         dag = dagbag.get_dag("ingest_bronze")
         task_ids = {t.task_id for t in dag.tasks}
         assert task_ids == {
-            "ingest_customer", "ingest_policy", "ingest_claims", "ingest_voc"
+            "ingest_chan1_customer",
+            "ingest_chan1_policy",
+            "ingest_chan1_claims",
+            "ingest_chan2_voc",
         }
 
     def test_schedule_is_daily(self, dagbag):
@@ -51,7 +54,6 @@ class TestTransformSilver:
 
     def test_triggered_by_assets(self, dagbag):
         dag = dagbag.get_dag("transform_silver")
-        # Asset-scheduled DAGs have a list of Assets as their schedule
         assert dag.schedule_interval is not None
 
 

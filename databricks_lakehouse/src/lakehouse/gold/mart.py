@@ -27,13 +27,11 @@ if TYPE_CHECKING:
     from lakehouse.config.settings import Settings
     from pyspark.sql import SparkSession
 
-MARTS = ["voc_daily", "policy_summary", "claims_analysis"]
-
 
 def build_voc_daily(spark: "SparkSession", settings: "Settings") -> int:
     """Daily VOC summary: complaint counts, resolution rate, avg resolution time."""
-    voc = spark.read.format("delta").load(settings.silver_path("voc"))
-    customer = spark.read.format("delta").load(settings.silver_path("customer"))
+    voc = spark.read.format("delta").load(settings.silver_path("chan2", "voc"))
+    customer = spark.read.format("delta").load(settings.silver_path("chan1", "customer"))
 
     mart = (
         voc.join(customer.select("customer_id", "channel"), on="customer_id", how="left")
@@ -61,8 +59,8 @@ def build_voc_daily(spark: "SparkSession", settings: "Settings") -> int:
 
 def build_policy_summary(spark: "SparkSession", settings: "Settings") -> int:
     """Policy portfolio summary: active counts, premium by product and channel."""
-    policy = spark.read.format("delta").load(settings.silver_path("policy"))
-    customer = spark.read.format("delta").load(settings.silver_path("customer"))
+    policy = spark.read.format("delta").load(settings.silver_path("chan1", "policy"))
+    customer = spark.read.format("delta").load(settings.silver_path("chan1", "customer"))
 
     mart = (
         policy.join(customer.select("customer_id", "channel"), on="customer_id", how="left")
@@ -83,8 +81,8 @@ def build_policy_summary(spark: "SparkSession", settings: "Settings") -> int:
 
 def build_claims_analysis(spark: "SparkSession", settings: "Settings") -> int:
     """Claims funnel: settlement rates, processing time, amount by product."""
-    claims = spark.read.format("delta").load(settings.silver_path("claims"))
-    policy = spark.read.format("delta").load(settings.silver_path("policy"))
+    claims = spark.read.format("delta").load(settings.silver_path("chan1", "claims"))
+    policy = spark.read.format("delta").load(settings.silver_path("chan1", "policy"))
 
     mart = (
         claims.join(

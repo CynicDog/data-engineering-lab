@@ -1,0 +1,62 @@
+channels:
+  chan1:
+    tables:
+      customer:
+        pk: customer_id
+        dedup_ts_col: _ingest_ts
+        schedule_type: daily
+        cast_types:
+          birth_date: date
+          created_at: timestamp
+          updated_at: timestamp
+        pii:
+          rrn_masked: mask_rrn
+          phone_masked: mask_phone
+        derived_columns: {}
+
+      policy:
+        pk: policy_id
+        dedup_ts_col: _ingest_ts
+        schedule_type: daily
+        cast_types:
+          start_date: date
+          end_date: date
+          premium: double
+          created_at: timestamp
+          updated_at: timestamp
+        pii: {}
+        derived_columns:
+          policy_age_days: "datediff(coalesce(end_date, current_date()), start_date)"
+
+      claims:
+        pk: claim_id
+        dedup_ts_col: _ingest_ts
+        schedule_type: daily
+        cast_types:
+          claim_date: date
+          claim_amount: double
+          settled_amount: double
+          processed_at: timestamp
+          created_at: timestamp
+          updated_at: timestamp
+        pii: {}
+        derived_columns:
+          processing_days: "CASE WHEN processed_at IS NOT NULL THEN datediff(cast(processed_at AS date), claim_date) END"
+
+  chan2:
+    tables:
+      voc:
+        pk: voc_id
+        dedup_ts_col: _ingest_ts
+        schedule_type: daily
+        cast_types:
+          created_at: timestamp
+          resolved_at: timestamp
+        pii: {}
+        derived_columns:
+          resolution_hours: "CASE WHEN resolved_at IS NOT NULL THEN (unix_timestamp(resolved_at) - unix_timestamp(created_at)) / 3600.0 END"
+
+marts:
+  - voc_daily
+  - policy_summary
+  - claims_analysis

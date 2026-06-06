@@ -15,10 +15,12 @@ from __future__ import annotations
 from airflow.sdk import dag, task
 from airflow.sdk.definitions.asset import Asset
 
+from lakehouse.config.registry import load_registry
+
+registry = load_registry()
+
 SILVER_ASSET = Asset("s3://lakehouse/silver")
 GOLD_ASSET = Asset("s3://lakehouse/gold")
-
-MARTS = ["voc_daily", "policy_summary", "claims_analysis"]
 
 
 @dag(
@@ -34,7 +36,7 @@ Builds denormalized, business-ready mart tables from Silver.
 
 **Trigger**: Airflow Asset event from `transform_silver`.
 
-**Available marts**:
+**Available marts** (from `config/table_registry.yaml`):
 - `voc_daily` — daily VOC counts, resolution rate, avg resolution time
 - `policy_summary` — active policy counts + premium by product/channel
 - `claims_analysis` — settlement rates and processing time by product
@@ -46,16 +48,18 @@ full of custom SQL and ad-hoc joins — now testable, versionable Python.
 def build_gold():
     @task(outlets=[GOLD_ASSET], retries=1)
     def build_all() -> dict:
+        from lakehouse.config.registry import load_registry
         from lakehouse.config.settings import load_settings
-        from lakehouse.gold.mart import MARTS, build_mart
+        from lakehouse.gold.mart import build_mart
         from lakehouse.spark_utils.session import get_spark
 
         settings = load_settings()
+        registry = load_registry()
         spark = get_spark(settings, app_name="gold_build")
 
         results = {}
         try:
-            for mart in MARTS:
+            for mart in registry.marts:
                 rows = build_mart(spark, settings, mart)
                 results[mart] = rows
         finally:
