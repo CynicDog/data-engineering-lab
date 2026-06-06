@@ -140,7 +140,7 @@ the audit log for at least one full week of production data.
 ### The Real Problem at Your Company
 
 Your ADF pipeline uses SHIR to pull from on-premise ODS channel databases
-(MLCRP, MLVOC, MLIWT, MLSQP) and drops parquet files into ADLS. After each
+(CHAN1, CHAN2, CHAN3, CHAN4) and drops parquet files into ADLS. After each
 successful copy activity, ADF writes a line to a status.txt file in a control
 folder. Databricks reads this file, parses it, processes the referenced parquets,
 and deletes the file.

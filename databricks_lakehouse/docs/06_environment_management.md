@@ -20,10 +20,10 @@ spark.sql(f"SELECT * FROM {catalog}.bronze.voc")
 ```
 
 This pattern scales terribly:
-- You have MLCRP, MLVOCP, MLIWT, MLSQP → four catalogs, each with dev/prod variants
+- You have CHAN1, CHAN2P, CHAN3, CHAN4 → four catalogs, each with dev/prod variants
 - Eight catalog names to manage, branching in every notebook and job
 - Adding a new catalog means updating every place that branches on env
-- A typo in `MLVOCD` vs `MLVOCP` causes a silent wrong-environment read
+- A typo in `CHAN2D` vs `CHAN2P` causes a silent wrong-environment read
 
 
 ## The Fix: Profile-Based Configuration
@@ -66,24 +66,24 @@ The catalog name is configuration, not code.
 
 ## Extending to Multiple Catalogs
 
-For MLCRP, MLVOCP, MLIWT, MLSQP (mapping to on-premise channel databases):
+For CHAN1, CHAN2P, CHAN3, CHAN4 (mapping to on-premise channel databases):
 
 ```yaml
 # config/dev.yaml
 env: dev
 catalogs:
-  crp: MLCRPD
-  voc: MLVOCD
-  iwt: MLIWTD
-  sqp: MLSQPD
+  crp: CHAN1D
+  voc: CHAN2D
+  iwt: CHAN3D
+  sqp: CHAN4D
 
 # config/prod.yaml
 env: prod
 catalogs:
-  crp: MLCRPP
-  voc: MLVOCP
-  iwt: MLIWTP
-  sqp: MLSQPP
+  crp: CHAN1P
+  voc: CHAN2P
+  iwt: CHAN3P
+  sqp: CHAN4P
 ```
 
 ```python
@@ -93,7 +93,7 @@ class Settings:
     catalogs: dict[str, str]  # logical name → actual UC catalog name
 
 settings = load_settings()
-crp_catalog = settings.catalogs["crp"]  # "MLCRPD" in dev, "MLCRPP" in prod
+crp_catalog = settings.catalogs["crp"]  # "CHAN1D" in dev, "CHAN1P" in prod
 spark.sql(f"SELECT * FROM {crp_catalog}.bronze.policy")
 ```
 
@@ -192,10 +192,10 @@ Same pattern repeats for every channel database:
 | Logical | DEV | PROD |
 |---|---|---|
 | VOC | VOCD | VOCP |
-| MLCRP | MLCRPD | MLCRPP |
-| MLVOC | MLVOCD | MLVOCP |
-| MLIWT | MLIWTD | MLIWTP |
-| MLSQP | MLSQPD | MLSQPP |
+| CHAN1 | CHAN1D | CHAN1P |
+| CHAN2 | CHAN2D | CHAN2P |
+| CHAN3 | CHAN3D | CHAN3P |
+| CHAN4 | CHAN4D | CHAN4P |
 
 Eight catalog names. Every notebook, every SQL query, every Python file that
 references a catalog must somehow know which environment it is in. The current
@@ -216,14 +216,14 @@ bundle:
 variables:
   voc_catalog:
     description: "VOC channel catalog"
-  mlcrp_catalog:
-    description: "MLCRP channel catalog"
-  mlvoc_catalog:
-    description: "MLVOC channel catalog"
-  mliwt_catalog:
-    description: "MLIWT channel catalog"
-  mlsqp_catalog:
-    description: "MLSQP channel catalog"
+  chan1_catalog:
+    description: "CHAN1 channel catalog"
+  chan2_catalog:
+    description: "CHAN2 channel catalog"
+  chan3_catalog:
+    description: "CHAN3 channel catalog"
+  chan4_catalog:
+    description: "CHAN4 channel catalog"
 
 targets:
   dev:
@@ -231,39 +231,39 @@ targets:
       host: https://adb-dev-xxxx.azuredatabricks.net
     variables:
       voc_catalog: VOCD
-      mlcrp_catalog: MLCRPD
-      mlvoc_catalog: MLVOCD
-      mliwt_catalog: MLIWTD
-      mlsqp_catalog: MLSQPD
+      chan1_catalog: CHAN1D
+      chan2_catalog: CHAN2D
+      chan3_catalog: CHAN3D
+      chan4_catalog: CHAN4D
 
   prod:
     workspace:
       host: https://adb-prod-yyyy.azuredatabricks.net
     variables:
       voc_catalog: VOCP
-      mlcrp_catalog: MLCRPP
-      mlvoc_catalog: MLVOCP
-      mliwt_catalog: MLIWTP
-      mlsqp_catalog: MLSQPP
+      chan1_catalog: CHAN1P
+      chan2_catalog: CHAN2P
+      chan3_catalog: CHAN3P
+      chan4_catalog: CHAN4P
 ```
 
 **Inject catalog names as job parameters at deploy time:**
 ```yaml
 resources:
   jobs:
-    mlcrp_bronze:
-      name: "MLCRP Bronze [${var.mlcrp_catalog}]"
+    chan1_bronze:
+      name: "CHAN1 Bronze [${var.chan1_catalog}]"
       tasks:
         - task_key: ingest
           notebook_task:
             notebook_path: ./notebooks/bronze_ingest
             base_parameters:
-              catalog: ${var.mlcrp_catalog}
+              catalog: ${var.chan1_catalog}
               voc_catalog: ${var.voc_catalog}
 ```
 
 When `databricks bundle deploy --target dev` runs in AzDevOps, the `catalog`
-parameter is set to `MLCRPD`. When `--target prod` runs, it is set to `MLCRPP`.
+parameter is set to `CHAN1D`. When `--target prod` runs, it is set to `CHAN1P`.
 The parameter is baked into the deployed Job definition — no branching at runtime.
 
 ### Python Code: Zero Environment Branching

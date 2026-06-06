@@ -158,7 +158,7 @@ mid-notebook, partial write) the downstream layer never fires. You discover the
 problem when a stakeholder notices stale data in a Gold mart — and diagnosing it
 means starting a Job Cluster to `ls` storage paths.
 
-Additionally, you have per-catalog Bronze workflows (MLCRP, MLVOC, MLIWT, MLSQP)
+Additionally, you have per-catalog Bronze workflows (CHAN1, CHAN2, CHAN3, CHAN4)
 with no documented reason for the separation. Silver needs to know all four are
 done before it processes. Gold needs Silver to be done. The signal for all of this
 is fragile files.
@@ -173,18 +173,18 @@ no flag files. If Bronze fails, the Workflow stops and sends an alert.
 ```yaml
 resources:
   jobs:
-    mlcrp_pipeline:
-      name: "MLCRP Daily Pipeline [${var.catalog}]"
+    chan1_pipeline:
+      name: "CHAN1 Daily Pipeline [${var.catalog}]"
       tasks:
         - task_key: bronze_customer
           notebook_task:
             notebook_path: ./notebooks/bronze_ingest
-            base_parameters: { table: customer, catalog: "${var.mlcrp_catalog}" }
+            base_parameters: { table: customer, catalog: "${var.chan1_catalog}" }
 
         - task_key: bronze_policy
           notebook_task:
             notebook_path: ./notebooks/bronze_ingest
-            base_parameters: { table: policy, catalog: "${var.mlcrp_catalog}" }
+            base_parameters: { table: policy, catalog: "${var.chan1_catalog}" }
 
         - task_key: silver_transform
           depends_on:
@@ -192,14 +192,14 @@ resources:
             - task_key: bronze_policy
           notebook_task:
             notebook_path: ./notebooks/silver_transform
-            base_parameters: { catalog: "${var.mlcrp_catalog}" }
+            base_parameters: { catalog: "${var.chan1_catalog}" }
 
         - task_key: gold_mart
           depends_on:
             - task_key: silver_transform
           notebook_task:
             notebook_path: ./notebooks/gold_mart
-            base_parameters: { catalog: "${var.mlcrp_catalog}" }
+            base_parameters: { catalog: "${var.chan1_catalog}" }
 ```
 
 `silver_transform` only starts when BOTH `bronze_customer` and `bronze_policy`
@@ -213,10 +213,10 @@ Workflows for Bronze. Use a **coordinator Workflow** that uses the
 
 ```
 coordinator_workflow
-├── run_job: mlcrp_bronze_workflow    ─┐
-├── run_job: mlvoc_bronze_workflow     ├─ fan out (parallel)
-├── run_job: mliwt_bronze_workflow     │
-└── run_job: mlsqp_bronze_workflow    ─┘
+├── run_job: chan1_bronze_workflow    ─┐
+├── run_job: chan2_bronze_workflow     ├─ fan out (parallel)
+├── run_job: chan3_bronze_workflow     │
+└── run_job: chan4_bronze_workflow    ─┘
     ↓ (all succeed)
 run_job: silver_workflow
     ↓
