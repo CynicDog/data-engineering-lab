@@ -13,16 +13,16 @@ and practice the patterns before applying them to production Databricks.
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │            6 Pain Points → 6 Patterns                                  │
-├──────────────────────────┬─────────────────────┬──────────────────────┤
-│ Pain Point               │ Root Cause           │ Pattern in This Lab  │
-├──────────────────────────┼─────────────────────┼──────────────────────┤
-│ 1. 6–7 min cold start    │ Per-job VM spinup    │ Always-on Spark      │
-│ 2. status.txt fragility  │ File-based IPC       │ Delta audit table    │
-│ 3. File-based triggers   │ No deliberate design │ Airflow Asset graph  │
-│ 4. ESM blocks ops        │ Deploy ≠ run-time    │ API + feature flags  │
-│ 5. VOCP/VOCD chaos       │ No config layer      │ Profile Settings     │
-│ 6. Notebook + no tests   │ Cultural/tooling gap │ Package + pytest     │
-└──────────────────────────┴─────────────────────┴──────────────────────┘
+├──────────────────────────┬─────────────────────┬───────────────────────┤
+│ Pain Point               │ Root Cause          │  Pattern in This Lab  │
+├──────────────────────────┼─────────────────────┼───────────────────────┤
+│ 1. 6–7 min cold start    │ Per-job VM spinup   │ Always-on Spark       │
+│ 2. status.txt fragility  │ File-based IPC      │ Delta audit table     │
+│ 3. File-based triggers   │ No deliberate design│ Airflow Asset graph   │
+│ 4. ESM blocks ops        │ Deploy ≠ run-time   │ API + feature flags   │
+│ 5. VOCP/VOCD chaos       │ No config layer     │ Profile Settings      │
+│ 6. Notebook + no tests   │ Cultural/tooling gap│  Package + pytest     │
+└──────────────────────────┴─────────────────────┴───────────────────────┘
 ```
 
 Each column links to a deep-dive doc in `docs/`.

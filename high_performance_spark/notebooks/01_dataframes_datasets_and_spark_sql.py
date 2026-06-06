@@ -35,12 +35,13 @@ def _(mo):
 @app.cell
 def _():
     import os
+    import subprocess
     import tempfile
     from pathlib import Path
     from textwrap import dedent
 
     JAVA_HOME = Path(
-        "/Users/eunsang/Library/Java/JavaVirtualMachines/temurin-17.0.18/Contents/Home"
+        subprocess.check_output(["/usr/libexec/java_home", "-v", "17"], text=True).strip()
     )
     assert (JAVA_HOME / "bin" / "java").exists(), f"JDK not found at {JAVA_HOME}"
 
@@ -1232,6 +1233,425 @@ def _(mo):
     ```
 
     For long-lived datasets you'd usually register a managed or external table in a catalog (Hive, Iceberg, Unity, Polaris, Delta) and query it by its qualified name (`db.schema.table`). The DataFrame returned is identical regardless of the source — temp view, file path, or catalog table.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Data Loading and Saving
+
+    Spark SQL has its own I/O layer — `DataFrameReader` (`spark.read`) and `DataFrameWriter` (`df.write`) — separate from the core `SparkContext` file APIs. The reason is pushdown: if the optimizer understands what format and predicate you have, it can ask the storage layer to skip reading unnecessary rows or columns before any data enters the JVM. That contract only works if both sides speak the same language.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### JSON — schema inference and `samplingRatio`
+
+    JSON carries no schema contract, so Spark samples records at read time to infer one. The default samples a fraction — enough to be fast, not enough to be certain on heterogeneous files.
+
+    - `option("samplingRatio", "1.0")` forces Spark to examine every record. Correct for tricky files, but a full extra pass.
+    - Providing an explicit schema skips inference entirely — faster, and makes the contract visible in code.
+
+    > **Production rule.** In exploratory work, let Spark infer. In production, pin a schema. A new upstream field should be a deliberate decision, not a surprise that silently widens your schema and breaks downstream consumers.
+    """)
+    return
+
+
+@app.cell
+def _():
+    import json as _json
+    import tempfile as _tmp_json
+    from pathlib import Path as _PJson
+
+    _records = [
+        {"id": 1, "zip": "94110",   "species": "giant", "happy": True,  "score": 0.4},
+        {"id": 2, "zip": "94110",   "species": "red",   "happy": False, "score": 0.7},
+        {"id": 3, "zip": "10001",   "species": "giant", "happy": False},   # score absent — tests inference
+        {"id": 4, "zip": "M1B 5K7", "species": "giant", "happy": True,  "score": 0.6},
+    ]
+
+    _json_dir = _PJson(_tmp_json.mkdtemp()) / "otters_json"
+    _json_dir.mkdir()
+    (_json_dir / "part0.json").write_text("\n".join(_json.dumps(r) for r in _records))
+
+    json_path = str(_json_dir)
+    return (json_path,)
+
+
+@app.cell
+def _(json_path, spark):
+    # samplingRatio=1.0 — all four records read, `score` correctly inferred as nullable double
+    df_json = (
+        spark.read
+        .format("json")
+        .option("samplingRatio", "1.0")
+        .load(json_path)
+    )
+    df_json.printSchema()
+    df_json.show()
+    return (df_json,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Parquet — reading and writing
+
+    Parquet is Spark SQL's home format: columnar, splittable, self-describing, and understood by nearly every query engine in the data stack. A few options that matter in practice:
+
+    | Config / option | Default | What it does |
+    |---|---|---|
+    | `spark.sql.parquet.binaryAsString` | `false` | Treat binary columns as strings — set when reading files from older Spark or Impala |
+    | `mergeSchema` | `false` | Union schemas across partition files — useful when files were added over time with evolving columns |
+    | `spark.sql.parquet.compression.codec` | `gzip` | Codec per write. `snappy` decompresses faster; `zstd` often wins on both size and speed on modern hardware |
+    | `spark.sql.parquet.filterPushdown` | `true` | Let predicates reach the scan — skips entire row groups without reading them. Almost never turn this off |
+
+    `df.write.format("parquet").save(path)` is the whole API for the common case.
+    """)
+    return
+
+
+@app.cell
+def _(df_json):
+    import tempfile as _tmp_pq
+    from pathlib import Path as _PPq
+
+    parquet_path = str(_PPq(_tmp_pq.mkdtemp()) / "otters_parquet")
+    df_json.write.format("parquet").option("compression", "snappy").save(parquet_path)
+    parquet_path
+    return (parquet_path,)
+
+
+@app.cell
+def _(parquet_path, spark):
+    df_parquet = spark.read.format("parquet").load(parquet_path)
+    df_parquet.printSchema()
+    df_parquet.show()
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Save modes
+
+    By default, writing to an existing path raises an exception — the same behaviour as core Spark's RDD writes. Specify a mode to change that:
+
+    | Mode | Behavior |
+    |---|---|
+    | `errorIfExists` | Throws if the target already exists. The safe default — forces an explicit decision |
+    | `append` | Adds new files alongside existing ones. The partition layout grows; no existing files are touched |
+    | `overwrite` | Replaces existing content. With `spark.sql.sources.partitionOverwriteMode = dynamic`, only the affected partitions are replaced rather than the whole table |
+    | `ignore` | Silently skips the write if the target already exists — useful for idempotent pipelines |
+
+    The API: `df.write.mode("append").format("parquet").save(path)`.
+    """)
+    return
+
+
+@app.cell
+def _(parquet_path, spark):
+    extra = spark.createDataFrame(
+        [(5, "94110", "red", True, 0.9), (6, "10001", "giant", False, 0.1)],
+        "id INT, zip STRING, species STRING, happy BOOLEAN, score DOUBLE",
+    )
+    extra.write.mode("append").format("parquet").save(parquet_path)
+
+    # Six rows now — four originals plus two appended
+    spark.read.format("parquet").load(parquet_path).orderBy("id").show()
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Partitioned writes — `partitionBy`
+
+    When you know your downstream readers will filter by a column, write the data partitioned on that column. Spark creates one subdirectory per distinct value (`zip=94110/`, `zip=10001/`, …), and any query with a `WHERE zip = '94110'` predicate will skip opening files in every other directory — **partition pruning**, and it is completely free.
+
+    At read time, point to the root and Spark discovers the partitions automatically. The partition column reappears in the schema without you listing it explicitly.
+
+    > **Watch out for small files.** A partition per-zip with six rows is a toy example. In production, a high-cardinality key like `user_id` produces millions of tiny files — slow to list, slow to open. A rule of thumb: aim for partition files between 128 MB and 1 GB, and keep the number of distinct partition values in the low thousands.
+    """)
+    return
+
+
+@app.cell
+def _(spark):
+    import tempfile as _tmp_part
+    from pathlib import Path as _PPart
+
+    partitioned_path = str(_PPart(_tmp_part.mkdtemp()) / "otters_by_zip")
+
+    _full = spark.createDataFrame(
+        [
+            (1, "94110",   "giant", True,  0.4),
+            (2, "94110",   "red",   False, 0.7),
+            (3, "10001",   "giant", False, 0.1),
+            (4, "M1B 5K7", "giant", True,  0.6),
+            (5, "94110",   "red",   True,  0.9),
+            (6, "10001",   "giant", False, 0.2),
+        ],
+        "id INT, zip STRING, species STRING, happy BOOLEAN, score DOUBLE",
+    )
+    _full.write.partitionBy("zip").format("parquet").save(partitioned_path)
+
+    # Partition column `zip` reappears automatically in the schema at read time
+    df_partitioned = spark.read.format("parquet").load(partitioned_path)
+    df_partitioned.printSchema()
+    df_partitioned.orderBy("id").show(truncate=False)
+    return (df_partitioned,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    #### Partition pruning in the physical plan
+
+    Filter on the partition column and look for `PartitionFilters` in the `FileScan` line of the physical plan. Parquet files outside the matching partition directories are never opened.
+    """)
+    return
+
+
+@app.cell
+def _(F, df_partitioned):
+    df_partitioned.filter(
+        (F.col("zip") == "94110") & (F.col("score") > 0.5)
+    ).explain(mode="simple")
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### From local collections and to RDDs
+
+    `spark.createDataFrame(rows, schema)` distributes in-memory data as a DataFrame — the same pattern used throughout this notebook for sample data. Useful for unit tests, reference tables, and small lookup datasets that need to join against large distributed data.
+
+    Going the other way — `.rdd` on a DataFrame — gives you an `RDD[Row]`. The data is converted from Spark SQL's internal Tungsten encoding into Row objects, so `.rdd` is a real conversion, not a view. Prefer staying in the DataFrame API; reach for `.rdd` only when you need something the DataFrame API genuinely can't express — cutting the optimizer's lineage for iterative algorithms is one legitimate case.
+    """)
+    return
+
+
+@app.cell
+def _(spark):
+    from pyspark.sql.types import (
+        ArrayType as _AT2,
+        BooleanType as _Bool2,
+        DoubleType as _Dbl2,
+        LongType as _Long2,
+        StringType as _Str2,
+        StructField as _F2,
+        StructType as _S2,
+    )
+
+    _schema = _S2([
+        _F2("id",         _Long2(),             False),
+        _F2("zip",        _Str2(),              True),
+        _F2("species",    _Str2(),              True),
+        _F2("happy",      _Bool2(),             False),
+        _F2("attributes", _AT2(_Dbl2(), False), True),
+    ])
+
+    df_local = spark.createDataFrame(
+        [(1, "94110", "giant", True, [0.4, 0.5]),
+         (2, "94110", "red",  False, [0.7, 0.2])],
+        schema=_schema,
+    )
+    df_local.show()
+
+    # .rdd converts to RDD[Row] — each element is a pyspark.sql.Row
+    first = df_local.rdd.first()
+    print(first, "→ id:", first["id"], " species:", first["species"])
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## UDFs — extending Spark SQL with Python functions
+
+    When the built-in `pyspark.sql.functions` don't cover your case, you can register a Python function as a UDF and use it anywhere a `Column` expression is accepted.
+
+    **The cost.** Python UDFs are a JVM → Python boundary crossing per row. Spark serializes each row, hands it to the Python process, your function runs, and the result is serialized back. For large datasets this can be 2–10× slower than an equivalent SQL expression.
+
+    The remedies, in order of preference:
+
+    1. Check if an existing `F.*` function covers it — they usually do.
+    2. Use `F.expr("…")` with a SQL string — same optimizer, no boundary crossing.
+    3. Use a **pandas UDF** (`@pandas_udf`) — operates on `pd.Series` batches via Arrow, far lower overhead than scalar UDFs.
+    4. Write the UDF in Scala and register it for Python callers — zero serialization cost.
+
+    > **Even with JVM languages, UDFs are generally slower than the equivalent SQL expression** because Catalyst cannot inspect their logic. A UDF is a black box; a SQL expression is a transparent tree the optimizer can push down, reorder, or fold.
+    """)
+    return
+
+
+@app.cell
+def _(F, otters_flat):
+    from pyspark.sql.functions import udf
+    from pyspark.sql.types import DoubleType as _DblUdf
+
+    # Scalar UDF: ratio of attr0 to the sum of both attributes
+    @udf(returnType=_DblUdf())
+    def dominance(attrs):
+        if attrs is None or len(attrs) < 2:
+            return None
+        total = attrs[0] + attrs[1]
+        return attrs[0] / total if total > 0 else 0.0
+
+    # Identical result expressed as a SQL expression — no UDF, no boundary crossing
+    dominance_sql = F.col("attributes")[0] / (F.col("attributes")[0] + F.col("attributes")[1])
+
+    otters_flat.select(
+        "id",
+        F.col("attributes"),
+        dominance(F.col("attributes")).alias("dominance_udf"),
+        dominance_sql.alias("dominance_sql"),
+    ).show(truncate=False)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Pandas UDFs — vectorized, much lower overhead
+
+    A pandas UDF receives a `pd.Series` (or `pd.DataFrame` for multi-column inputs) instead of one value at a time. Spark transfers data in Apache Arrow columnar batches, so the per-row serialization cost collapses into a per-batch cost. For compute-heavy custom logic, pandas UDFs are the right Python-native choice.
+
+    ```python
+    from pyspark.sql.functions import pandas_udf
+    import pandas as pd
+
+    @pandas_udf("double")
+    def attr0_z_score(series: pd.Series) -> pd.Series:
+        return (series - series.mean()) / series.std()
+
+    otters_flat.withColumn(
+        "attr0_z",
+        attr0_z_score(F.col("attributes")[0])
+    ).show()
+    ```
+
+    Requires `pyarrow` (`pip install pyarrow`). Python UDAFs that support partial aggregation are also available via `@pandas_udf` with `PandasUDFType.GROUPED_AGG` — the Python answer to Scala's `UserDefinedAggregateFunction`.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Query Optimizer — Catalyst
+
+    Every DataFrame transformation builds a **logical plan** — a tree of relational operators (Project, Filter, Join, Aggregate, …). Catalyst optimizes that tree in several passes before producing a **physical plan** that Spark actually executes.
+
+    The stages, in order:
+
+    1. **Unresolved logical plan** — column names and types are not yet validated.
+    2. **Analyzed logical plan** — names resolved against the schema, types checked. This is where schema eagerness lives.
+    3. **Optimized logical plan** — rule-based passes: filter pushdown, constant folding, operator collapsing, null simplification, predicate reordering, …
+    4. **Physical plan(s)** — one or more candidate execution strategies (sort-merge join vs. broadcast join, etc.), selected by a cost model. AQE may revise the choice at runtime.
+
+    `df.explain(mode=…)` exposes all four. `mode="simple"` prints only the physical plan; `mode="extended"` prints all four.
+    """)
+    return
+
+
+@app.cell
+def _(F, otters_flat):
+    # A chain that gives Catalyst something to work with: filter, groupBy, post-agg filter
+    _q = (
+        otters_flat
+        .filter(F.col("happy"))
+        .groupBy("zip")
+        .agg(F.avg(F.col("attributes")[0]).alias("avg_attr0"))
+        .filter(F.col("avg_attr0") > 0.4)
+    )
+    _q.explain(mode="extended")
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    #### What to look for in the plan
+
+    - **Optimized logical plan** — the `Filter(happy)` moved as close to the `LocalRelation` scan as possible (pre-aggregation filtering reduces the rows that reach the `groupBy`). The post-aggregation filter on `avg_attr0` stays above — correctly, because it depends on the aggregate result.
+    - **Physical plan** — look for `HashAggregate` appearing *twice*: a partial aggregate on each partition (before the shuffle) and a final aggregate after. That's Catalyst rewriting a naïve group-then-reduce into a combiner pattern — the same transformation that makes `groupBy` safe on DataFrames but dangerous on RDDs.
+    - **`PushedFilters`** — on file-backed sources (Parquet, ORC, Delta), predicates that can be evaluated at scan time appear here and let Spark skip entire row groups without reading them.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Filter pushdown — seeing it in the physical plan
+
+    With a Parquet-backed source, predicates on primitive columns are pushed to the Parquet row-group statistics. The physical plan makes this concrete.
+    """)
+    return
+
+
+@app.cell
+def _(F, df_partitioned):
+    df_partitioned.filter(
+        (F.col("zip") == "94110") & (F.col("score") > 0.5)
+    ).explain(mode="simple")
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    Two kinds of filters in the scan line:
+
+    - **`PartitionFilters`** — directories ruled out by the partition key. Files in those directories are never opened, not even listed.
+    - **`DataFilters` / `PushedFilters`** — predicates on non-partition columns evaluated against Parquet row-group min/max statistics. Spark may still re-check them row-by-row after reading (the "residual filter" step), but the row-group skip alone can eliminate substantial I/O.
+
+    Both happen before any data enters the JVM. Writing well-chosen partition columns and keeping row-group statistics intact — don't over-compress or over-coalesce your Parquet — is the single highest-leverage I/O optimization for Parquet-heavy pipelines.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Static optimizer rules — the broad categories
+
+    Catalyst's static rules (the ones that run before the job starts, visible in `explain`) fall into three rough families:
+
+    - **Pushdown / reordering** — move anything that reduces data size as early as possible. Filter pushdown is the canonical example; predicate pushdown through joins is another.
+    - **Operator collapse** — merge adjacent compatible operators. Two consecutive `filter` calls collapse into one; two consecutive `select` calls are combined. This is why chaining transformations is essentially free — the optimizer flattens them.
+    - **Simplification** — fold constants (`1 + 1 → 2`), eliminate dead branches (`CASE WHEN false THEN … → NULL`), strip away `IsNotNull` checks that are implied by a surrounding join.
+
+    These run on the query plan without knowing data sizes. Anything that depends on runtime sizes is deferred to AQE.
+
+    > **Don't outsource the obvious.** Catalyst is good but not omniscient. If you filter early, avoid wide `select *` where you need a handful of columns, and don't `collect_list` over unbounded groups — you will outperform a naïvely written query even before Catalyst gets involved.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Adaptive Query Execution (AQE)
+
+    AQE is Catalyst's runtime counterpart. Static rules run before the job starts; AQE runs *during* the job, re-optimizing based on what the data actually looks like at each shuffle boundary.
+
+    The two highest-impact things AQE does:
+
+    1. **Partition coalescing.** After a shuffle, if partitions are small, AQE merges adjacent ones. This eliminates the classic "too many small tasks" overhead that previously required manually tuning `spark.sql.shuffle.partitions`.
+    2. **Join strategy switching.** If a join's "large" side turns out to be small enough to broadcast, AQE flips a planned sort-merge join to a broadcast join at runtime — even if the pre-execution statistics didn't predict it.
+
+    AQE is on by default since Spark 3.2. You won't see it in `explain()` output because `explain()` is pre-execution. Run the job and check the Spark UI's SQL tab for the finalized adaptive plan.
+
+    > **One known pitfall.** AQE can attempt to match output partitioning to a target table's partition layout. For skewed data, that undoes careful pre-shuffle work and can cause severe performance regressions. In Iceberg the escape hatch is setting the table property `write.distribution-mode = none` at write time.
     """)
     return
 
