@@ -32,10 +32,17 @@ RUN pip install --no-cache-dir \
     "pytest>=8" \
     "apache-airflow-providers-amazon>=9.0"
 
-# Pre-warm the Delta JAR cache so the first task doesn't download from Maven.
-# In airgapped environments (망분리), replace this with a local Nexus/Artifactory mirror.
+# Pre-warm Delta + hadoop-aws JAR caches so tasks don't download from Maven at runtime.
+# In airgapped environments (망분리), replace Maven central with a Nexus/Artifactory mirror
+# and point spark.jars.ivySettings to your internal ivysettings.xml.
 RUN python3 -c "\
 from delta import configure_spark_with_delta_pip; \
 from pyspark.sql import SparkSession; \
-spark = configure_spark_with_delta_pip(SparkSession.builder.master('local[1]')).getOrCreate(); \
+spark = configure_spark_with_delta_pip( \
+    SparkSession.builder.master('local[1]'), \
+    extra_packages=[ \
+        'org.apache.hadoop:hadoop-aws:3.3.4', \
+        'com.amazonaws:aws-java-sdk-bundle:1.12.262', \
+    ] \
+).getOrCreate(); \
 spark.stop()" 2>&1 | tail -3 || true

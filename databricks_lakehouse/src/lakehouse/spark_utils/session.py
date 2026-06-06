@@ -35,15 +35,15 @@ def get_spark(settings: "Settings | None" = None, app_name: str = "lakehouse"):
         .config("spark.ui.enabled", "false")
     )
 
+    # hadoop-aws must go through extra_packages, not spark.jars.packages on the
+    # builder directly — configure_spark_with_delta_pip overwrites that config key.
+    extra_packages: list[str] = []
     if settings and settings.s3_endpoint:
-        # hadoop-aws enables S3A access to MinIO (ADLS Gen2 equivalent).
-        # In airgapped environments (망분리), host these JARs in Nexus/Artifactory
-        # and point spark.jars.ivySettings to your internal mirror.
-        builder = builder.config(
-            "spark.jars.packages",
-            "org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262",
-        )
+        extra_packages = [
+            "org.apache.hadoop:hadoop-aws:3.3.4",
+            "com.amazonaws:aws-java-sdk-bundle:1.12.262",
+        ]
         for key, value in settings.spark_s3a_conf.items():
             builder = builder.config(key, value)
 
-    return configure_spark_with_delta_pip(builder).getOrCreate()
+    return configure_spark_with_delta_pip(builder, extra_packages=extra_packages).getOrCreate()
