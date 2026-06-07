@@ -34,11 +34,15 @@ def build_voc_daily(spark: "SparkSession", settings: "Settings") -> int:
     customer = spark.read.format("delta").load(settings.silver_path("chan1", "customer"))
 
     mart = (
-        voc.join(customer.select("customer_id", "channel"), on="customer_id", how="left")
+        voc.join(
+            customer.select("customer_id", F.col("channel").alias("acq_channel")),
+            on="customer_id",
+            how="left",
+        )
         .groupBy(
             F.to_date(F.col("created_at")).alias("date"),
             F.col("complaint_type"),
-            F.col("channel"),
+            F.col("acq_channel").alias("channel"),
         )
         .agg(
             F.count("voc_id").alias("total_voc"),

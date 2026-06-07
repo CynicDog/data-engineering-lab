@@ -35,21 +35,32 @@ class Settings:
         """Return the Unity Catalog name for a logical channel (e.g. 'chan1' → 'CHAN1D')."""
         return self.catalogs[channel]
 
+    @property
+    def _storage_root(self) -> str:
+        """Storage URL root. Uses s3a:// when S3 is configured, local path otherwise.
+
+        When s3_endpoint is empty (integration tests, local dev), lake_bucket is
+        treated as a local filesystem path so PySpark can read/write without S3A.
+        """
+        if self.s3_endpoint:
+            return f"s3a://{self.lake_bucket}"
+        return self.lake_bucket
+
     def landing_path(self, channel: str, table: str, dt: str) -> str:
-        return f"s3a://{self.lake_bucket}/landing/{channel}/{table}/dt={dt}"
+        return f"{self._storage_root}/landing/{channel}/{table}/dt={dt}"
 
     def bronze_path(self, channel: str, table: str) -> str:
-        return f"s3a://{self.lake_bucket}/bronze/{channel}/{table}"
+        return f"{self._storage_root}/bronze/{channel}/{table}"
 
     def silver_path(self, channel: str, table: str) -> str:
-        return f"s3a://{self.lake_bucket}/silver/{channel}/{table}"
+        return f"{self._storage_root}/silver/{channel}/{table}"
 
     def gold_path(self, mart: str) -> str:
-        return f"s3a://{self.lake_bucket}/gold/{mart}"
+        return f"{self._storage_root}/gold/{mart}"
 
     def control_path(self, name: str) -> str:
         """Control plane paths: audit log, pipeline flags, etc."""
-        return f"s3a://{self.lake_bucket}/control/{name}"
+        return f"{self._storage_root}/control/{name}"
 
     @property
     def spark_s3a_conf(self) -> dict[str, str]:

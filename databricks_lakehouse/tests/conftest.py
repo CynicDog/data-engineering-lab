@@ -31,6 +31,26 @@ def spark():
 
 
 @pytest.fixture
+def local_settings(tmp_path):
+    """Settings using tmp_path as the storage root (no S3, no MinIO).
+
+    When s3_endpoint is empty, Settings._storage_root returns lake_bucket directly,
+    so all path methods resolve to local filesystem paths PySpark can read/write.
+    """
+    from lakehouse.config.settings import Settings
+
+    return Settings(
+        env="test",
+        catalogs={"chan1": "CHAN1T", "chan2": "CHAN2T"},
+        lake_bucket=str(tmp_path),
+        s3_endpoint="",
+        s3_access_key="",
+        s3_secret_key="",
+        ods_url="",
+    )
+
+
+@pytest.fixture
 def fake_settings(tmp_path):
     """Settings pointing at tmp_path (local filesystem, no S3)."""
     from lakehouse.config.settings import Settings
