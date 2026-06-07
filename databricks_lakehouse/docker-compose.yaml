@@ -13,6 +13,9 @@ x-airflow-common:
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/config/simple_auth_manager_passwords.json
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    # Spark JVM cold-start can exceed the default 5-second httpx timeout;
+    # give the execution-API heartbeat client enough headroom to survive it.
+    AIRFLOW__WORKERS__API_CLIENT_REQUEST_TIMEOUT: "120"
     # Lake storage (MinIO = ADLS Gen2 equivalent)
     LAKE_BUCKET: lakehouse
     LAKE_S3_ENDPOINT: http://minio:9000
@@ -25,6 +28,8 @@ x-airflow-common:
     PYTHONPATH: /opt/airflow/src
     JAVA_HOME: /opt/java-home
   volumes:
+    - ./src:/opt/airflow/src
+    - ./config:/opt/airflow/config
     - ./dags:/opt/airflow/dags
     - ./tests:/opt/airflow/tests
     - ./logs:/opt/airflow/logs
@@ -90,11 +95,7 @@ services:
   airflow-init:
     <<: *airflow-common
     command: >
-      bash -c "
-        airflow db migrate &&
-        airflow users create --username admin --password admin
-          --firstname Admin --lastname User --role Admin --email admin@example.com || true
-      "
+      bash -c "airflow db migrate"
     restart: "no"
 
   airflow-apiserver:
