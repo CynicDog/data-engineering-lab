@@ -8,7 +8,9 @@ x-airflow-common:
     AIRFLOW__CORE__AUTH_MANAGER: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-apiserver:8080/execution/"
     AIRFLOW__CORE__SECRET_KEY: "lakehouse-lab-secret-key-do-not-use-in-prod"
+    AIRFLOW__WEBSERVER__SECRET_KEY: "lakehouse-lab-webserver-secret-do-not-use-in-prod"
     AIRFLOW__API_AUTH__JWT_SECRET: "lakehouse-lab-jwt-secret-do-not-use-in-prod"
+    AIRFLOW__CORE__BASE_URL: "http://airflow-apiserver:8080"
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "admin:Admin"
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/config/simple_auth_manager_passwords.json
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
@@ -27,6 +29,7 @@ x-airflow-common:
     # Make the lakehouse package importable inside containers
     PYTHONPATH: /opt/airflow/src
     JAVA_HOME: /opt/java-home
+    SPARK_LOCAL_HOSTNAME: localhost
   volumes:
     - ./src:/opt/airflow/src
     - ./config:/opt/airflow/config

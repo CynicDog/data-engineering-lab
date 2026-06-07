@@ -41,6 +41,7 @@ SILVER_ASSET = Asset("s3://lakehouse/silver")
     schedule=BRONZE_ASSETS,
     catchup=False,
     max_active_runs=1,
+    max_active_tasks=1,
     tags=["silver", "transform", "delta"],
     doc_md="""
 ## Silver Transforms
@@ -69,13 +70,9 @@ def transform_silver():
         spark = get_spark(settings, app_name="silver_transform")
 
         results = {}
-        try:
-            for spec in registry.all_tables():
-                rows = transform_table(spark, settings, spec)
-                results[f"{spec.channel}.{spec.name}"] = rows
-        finally:
-            spark.stop()
-
+        for spec in registry.all_tables():
+            rows = transform_table(spark, settings, spec)
+            results[f"{spec.channel}.{spec.name}"] = rows
         return results
 
     transform_all()

@@ -43,6 +43,7 @@ BRONZE_ASSETS = {
     start_date=datetime(2024, 1, 1),
     catchup=False,
     max_active_runs=1,
+    max_active_tasks=1,
     tags=["bronze", "ingest", "delta"],
     doc_md="""
 ## Bronze Ingestion
@@ -82,13 +83,9 @@ def ingest_bronze():
 
                 dt = (data_interval_end or datetime.now(timezone.utc)).date().isoformat()
 
-                try:
-                    result = ingest_table_with_audit(
-                        spark, settings, channel, table_name, dt, schedule_type="daily"
-                    )
-                    return result
-                finally:
-                    spark.stop()
+                return ingest_table_with_audit(
+                    spark, settings, channel, table_name, dt, schedule_type="daily"
+                )
 
             _ingest()
 

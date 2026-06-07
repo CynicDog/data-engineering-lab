@@ -28,6 +28,7 @@ GOLD_ASSET = Asset("s3://lakehouse/gold")
     schedule=[SILVER_ASSET],
     catchup=False,
     max_active_runs=1,
+    max_active_tasks=1,
     tags=["gold", "mart", "delta"],
     doc_md="""
 ## Gold Marts
@@ -58,13 +59,9 @@ def build_gold():
         spark = get_spark(settings, app_name="gold_build")
 
         results = {}
-        try:
-            for mart in registry.marts:
-                rows = build_mart(spark, settings, mart)
-                results[mart] = rows
-        finally:
-            spark.stop()
-
+        for mart in registry.marts:
+            rows = build_mart(spark, settings, mart)
+            results[mart] = rows
         return results
 
     build_all()
