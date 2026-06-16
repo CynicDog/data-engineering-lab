@@ -60,6 +60,42 @@ Then open:
 
 Full walkthrough with what to watch at each step: `docs/02_run_end_to_end.md`.
 
+## Reading the lake from your laptop (Polars / marimo)
+
+The lake lives in MinIO *inside* the cluster, so a local Polars / marimo session
+can't reach it over the in-cluster DNS. Expose MinIO's S3 API and point delta-rs
+at it:
+
+1. **Forward the S3 API to your host.** kind only maps the MinIO *console* (9031),
+   not the S3 API (9000), so forward it yourself and leave it running:
+
+   ```bash
+   kubectl --context kind-lakehouse -n lakehouse port-forward svc/minio 9000:9000
+   ```
+
+2. **Read the table.** The path is an S3 URI `s3://<bucket>/<prefix>` — the gold
+   `policy_summary` mart is `s3://lakehouse/gold/policy_summary`:
+
+   ```python
+   import polars as pl
+
+   df = pl.read_delta(
+       "s3://lakehouse/gold/policy_summary",
+       storage_options={
+           "AWS_ENDPOINT_URL": "http://localhost:9000",  # the port-forward
+           "AWS_ACCESS_KEY_ID": "minioadmin",
+           "AWS_SECRET_ACCESS_KEY": "minioadmin",
+           "AWS_REGION": "us-east-1",                     # any value; delta-rs requires one
+           "AWS_ALLOW_HTTP": "true",                      # MinIO serves http, not https
+       },
+   )
+   ```
+
+   Use the `s3://` scheme (delta-rs), not the Spark-side `s3a://` — same bucket,
+   different client. `AWS_ENDPOINT_URL` is what redirects delta-rs from real AWS to
+   MinIO; without it the read goes to s3.amazonaws.com. The same pattern reads any
+   layer: `s3://lakehouse/silver/chan1/customer`, `s3://lakehouse/bronze/chan1/policy`, …
+
 ## How it maps to the source project
 
 | Concern | databricks_lakehouse | lakehouse_on_kubernetes |
@@ -99,6 +135,8 @@ docs/             architecture, run guide, version-alignment notes
   standard watch-to-completion mode (robust across provider versions). The
   triggerer is deployed, so switching to `deferrable=True` later is a one-line
   change — see `docs/03_version_alignment.md`.
-- **Seed date vs `{{ ds }}`.** `make seed` writes for *today*; trigger the DAG
-  the same day so bronze's `--dt {{ ds }}` matches the seeded `dt=` partition.
+- **Seed date vs run date.** `make seed` writes a `dt=<today>` partition. The DAGs
+  derive their run date from the DAG run's timestamp (`dag_run.run_after` — Airflow
+  3 manual runs carry no `logical_date`), so trigger the DAG the same day you seed
+  and bronze's `--dt` matches the seeded `dt=` partition.
 ```
