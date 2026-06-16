@@ -16,18 +16,33 @@ JVM competes with Airflow for memory.
 ## After (this project)
 
 ```
-Airflow (KubernetesExecutor)                         Spark Operator
-  └─ worker pod: ingest_chan1_customer                 (controller, webhook)
-       └─ SparkKubernetesOperator                           │ reconciles
-            └─ applies SparkApplication CRD  ───────────────┤
-                                                            ▼
-                                              driver pod (jobs/bronze_job.py)
-                                                  └─ get_cluster_spark()
-                                                       └─ ingest_table_with_audit()
-                                                  └─ creates ►  executor pod x2
-                                                                  │
-                                                       read/write Delta on
-                                                       s3a://lakehouse/...  (MinIO)
+┌─────────────────────────────────┐
+│ Airflow worker pod              │   KubernetesExecutor spawns one
+│   task: ingest_chan1_customer   │   worker pod per task.
+│   └─ SparkKubernetesOperator    │
+└──────────────┬──────────────────┘
+               │ (1) kubectl apply: SparkApplication CRD
+               ▼
+┌─────────────────────────────────┐
+│ Spark Operator                  │   Watches for SparkApplication
+│   (controller + webhook)        │   objects and reconciles them.
+└──────────────┬──────────────────┘
+               │ (2) launches driver from lakehouse/spark:dev
+               ▼
+┌─────────────────────────────────┐
+│ Spark driver pod                │
+│   jobs/bronze_job.py            │
+│   └─ get_cluster_spark()        │
+│        └─ ingest_table_with_audit()
+└──────────────┬──────────────────┘
+               │ (3) creates executors
+               ▼
+┌─────────────────────────────────┐
+│ Spark executor pods  (x2)       │
+└──────────────┬──────────────────┘
+               │ (4) read Parquet / write Delta
+               ▼
+        s3a://lakehouse/...  (MinIO)
 ```
 
 The Airflow task is now lightweight: render a `SparkApplication` manifest, submit
