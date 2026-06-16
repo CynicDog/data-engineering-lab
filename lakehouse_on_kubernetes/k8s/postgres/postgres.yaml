@@ -1,0 +1,79 @@
+# Shared Postgres — mirrors the original docker-compose postgres:17 that served
+# BOTH roles: the Airflow metadata DB (database `airflow`) AND the simulated ODS
+# (database `ods`, created by init_ods.sql). The Airflow Helm chart is pointed at
+# this instance (postgresql.enabled: false), so we keep ONE Postgres, not two.
+#
+# The `pg-init` ConfigMap (created by scripts/up.sh from lakehouse/init_ods.sql)
+# is mounted into /docker-entrypoint-initdb.d; init_ods.sql self-switches to the
+# ods DB via `\connect ods`. ODS stays off the pipeline critical path — the
+# landing zone is seeded into MinIO by the generator Job.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: lakehouse
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: lakehouse
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17
+          env:
+            - name: POSTGRES_USER
+              value: airflow
+            - name: POSTGRES_PASSWORD
+              value: airflow
+            - name: POSTGRES_DB
+              value: airflow
+            # Keep initdb from choking if the PVC dir isn't empty on re-create.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "airflow"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-data
+        - name: init
+          configMap:
+            name: pg-init
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: lakehouse
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432

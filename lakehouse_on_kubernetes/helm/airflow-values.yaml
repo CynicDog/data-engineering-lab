@@ -1,0 +1,172 @@
+# Values for the apache-airflow/airflow chart, version 1.18.0 (appVersion 3.0.2).
+# Pinned in scripts/_lib.sh (AIRFLOW_CHART_VERSION). IMPORTANT: this chart enforces
+# a values.schema.json, so only known keys/types are accepted — validate edits with
+#   helm template apache-airflow/airflow --version 1.18.0 -f helm/airflow-values.yaml
+#
+# Must be 1.18.0+ : earlier charts are Airflow 2 and ship an airflow.www-based
+# local_settings that crashes on our Airflow 3 image.
+airflowVersion: "3.0.2"
+
+# Each task runs in its own worker pod (production-faithful). The heavy compute
+# is in Spark Operator pods regardless; these workers just submit + watch the CRD.
+executor: KubernetesExecutor
+
+# Our custom orchestration image (DAGs + lakehouse package + cncf-k8s provider).
+images:
+  airflow:
+    repository: lakehouse/airflow
+    tag: dev
+    pullPolicy: IfNotPresent
+
+# Reuse the shared external Postgres (k8s/postgres) for Airflow metadata, exactly
+# as the original docker-compose shared one postgres for metadata + ODS.
+postgresql:
+  enabled: false
+data:
+  metadataConnection:
+    user: airflow
+    pass: airflow
+    protocol: postgresql
+    host: postgres.lakehouse.svc.cluster.local
+    port: 5432
+    db: airflow
+    sslmode: disable
+
+# KubernetesExecutor needs no Celery broker.
+redis:
+  enabled: false
+
+# DAGs are baked into the image at /opt/airflow/dags — no gitSync, no PVC.
+dags:
+  persistence:
+    enabled: false
+  gitSync:
+    enabled: false
+
+# Mount the lakehouse-config ConfigMap (source of truth: table_registry.yaml +
+# dev/prod.yaml) into every Airflow pod at the path parents[3] resolution expects.
+# Top-level volumes/volumeMounts apply to all components.
+volumes:
+  - name: lakehouse-config
+    configMap:
+      name: lakehouse-config
+volumeMounts:
+  - name: lakehouse-config
+    mountPath: /opt/lakehouse/config
+
+env:
+  - name: PYTHONPATH
+    value: /opt/lakehouse/src
+  - name: AIRFLOW__CORE__LOAD_EXAMPLES
+    value: "False"
+  # Lab convenience: use the SimpleAuthManager (as the source project did) and
+  # treat everyone as admin -> no login wall. The chart defaults to FabAuthManager,
+  # whose serialize_user is incompatible with the all-admins anonymous user
+  # (AttributeError: 'SimpleAuthManagerUser' has no attribute 'id'), so we must
+  # switch the auth manager too.
+  - name: AIRFLOW__CORE__AUTH_MANAGER
+    value: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
+  - name: AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS
+    value: "True"
+
+  # --- Concurrency caps for a single 8 GB kind node ---------------------------
+  # Each task spawns a worker pod plus a Spark driver and 2 executors, so the
+  # cluster's true compute footprint is a multiple of the active task count. On one
+  # 8 GB node the medallion DAGs' full fan-out exceeds node memory; bounding active
+  # tasks keeps the aggregate Spark footprint within capacity and leaves the
+  # control plane (api-server, scheduler) guaranteed headroom.
+  - name: AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG
+    value: "2"
+  - name: AIRFLOW__CORE__PARALLELISM
+    value: "4"
+  # Each gunicorn worker loads the whole Airflow app (~hundreds of MB). The default
+  # of 4 is sized for production concurrency this lab never sees; 2 is sufficient
+  # and roughly halves the api-server's resident memory.
+  - name: AIRFLOW__API__WORKERS
+    value: "2"
+
+  # --- Remote task logging to MinIO (S3-compatible) ---------------------------
+  # KubernetesExecutor task logs live only on the worker pod, which is ephemeral,
+  # and kind's local-path storageclass is RWO so a shared RWX log volume isn't an
+  # option. Logs must therefore go to durable external storage to survive the pod
+  # and be served by the api-server. MinIO is already the in-cluster S3, so it
+  # doubles as the log store (via apache-airflow-providers-amazon + the aws_logs
+  # connection below).
+  - name: AIRFLOW__LOGGING__REMOTE_LOGGING
+    value: "True"
+  - name: AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER
+    value: s3://lakehouse/airflow-logs
+  - name: AIRFLOW__LOGGING__REMOTE_LOG_CONN_ID
+    value: aws_logs
+  # Inline connection as JSON. login/password are the MinIO root creds; the extra
+  # points boto3 at the MinIO endpoint. MinIO has no per-bucket DNS, so addressing
+  # must be path-style (s3.amazonaws.com-style virtual-host buckets won't resolve).
+  - name: AIRFLOW_CONN_AWS_LOGS
+    value: >-
+      {"conn_type": "aws", "login": "minioadmin", "password": "minioadmin",
+       "extra": {"endpoint_url": "http://minio.lakehouse.svc.cluster.local:9000",
+                 "config_kwargs": {"s3": {"addressing_style": "path"}}}}
+
+# Expose the api-server (the Airflow 3 UI) as NodePort 30808; kind maps it to
+# localhost:8110 (helm/kind-config.yaml).
+apiServer:
+  service:
+    type: NodePort
+    ports:
+      - name: api-server
+        port: 8080
+        targetPort: api-server
+        nodePort: 30808
+  # The api-server backs the worker→execution-API heartbeat, so its availability
+  # is load-bearing for every running task. A resource request gives it scheduling
+  # priority that bursty Spark pods can't evict; the memory limit is sized for 2
+  # gunicorn workers (above) — too low and the container OOMs at startup.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 1536Mi
+  # The api-server shares its node with bursty Spark load and can be briefly slow
+  # to answer the /api/v2/version probe. The probes must tolerate that latency:
+  # a killed api-server severs the worker heartbeat, and the task SDK then aborts
+  # otherwise-healthy tasks ("Too many failed heartbeats"). Hence the generous
+  # timeouts and failure thresholds below.
+  livenessProbe:
+    initialDelaySeconds: 30
+    timeoutSeconds: 15
+    failureThreshold: 12
+    periodSeconds: 15
+  readinessProbe:
+    initialDelaySeconds: 30
+    timeoutSeconds: 15
+    failureThreshold: 12
+    periodSeconds: 15
+  startupProbe:
+    timeoutSeconds: 20
+    failureThreshold: 30
+    periodSeconds: 10
+
+# KubernetesExecutor worker pods (one per task). With get_logs=True the operator
+# buffers the streamed Spark driver log in memory, so a worker's peak memory scales
+# with how chatty its driver is — verbose jobs exceed the chart's default budget.
+# The limit covers that buffering; the request keeps workers from being first
+# evicted when the node is under pressure.
+workers:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+# Run the triggerer (enables deferrable operators later, if desired).
+triggerer:
+  enabled: true
+
+# We use SimpleAuthManager (above), so the FAB "create default user" job is not
+# applicable — it runs `airflow users create`, which doesn't exist under simple
+# auth, and would error. Disable it.
+webserver:
+  defaultUser:
+    enabled: false

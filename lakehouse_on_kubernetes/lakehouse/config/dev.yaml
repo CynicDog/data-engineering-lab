@@ -1,0 +1,22 @@
+# Dev profile — Kubernetes (Kind) deployment.
+#
+# Differs from databricks_lakehouse/config/dev.yaml ONLY in the service
+# endpoints: here MinIO and Postgres are reached by in-cluster DNS
+# (<service>.<namespace>.svc.cluster.local) instead of docker-compose names.
+#
+# Resolution order in load_settings(): env vars > this file > defaults.
+# The lakehouse-config ConfigMap mounts this file at /opt/lakehouse/config.
+env: dev
+
+catalogs:
+  chan1: CHAN1D
+  chan2: CHAN2D
+  chan3: CHAN3D
+  chan4: CHAN4D
+
+lake_bucket: lakehouse
+s3_endpoint: http://minio.lakehouse.svc.cluster.local:9000
+s3_access_key: minioadmin
+s3_secret_key: minioadmin
+
+ods_url: postgresql+psycopg2://ods:ods@postgres.lakehouse.svc.cluster.local:5432/ods

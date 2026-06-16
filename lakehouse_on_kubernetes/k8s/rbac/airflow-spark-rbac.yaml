@@ -1,0 +1,38 @@
+# RBAC so AIRFLOW can drive SparkApplication CRDs.
+# With KubernetesExecutor each task runs in a worker pod; the SparkKubernetesOperator
+# in that pod creates the SparkApplication and watches it to completion, streaming
+# driver logs. The scheduler/triggerer SAs are bound too for safety (deferrable
+# watch, log fetch). SA names assume the Airflow Helm release is named "airflow".
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: airflow-spark-submit
+  namespace: lakehouse
+rules:
+  - apiGroups: ["sparkoperator.k8s.io"]
+    resources: ["sparkapplications", "sparkapplications/status",
+                "scheduledsparkapplications", "scheduledsparkapplications/status"]
+    verbs: ["create", "get", "list", "watch", "patch", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: airflow-spark-submit
+  namespace: lakehouse
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: airflow-spark-submit
+subjects:
+  - kind: ServiceAccount
+    name: airflow-worker
+    namespace: lakehouse
+  - kind: ServiceAccount
+    name: airflow-scheduler
+    namespace: lakehouse
+  - kind: ServiceAccount
+    name: airflow-triggerer
+    namespace: lakehouse

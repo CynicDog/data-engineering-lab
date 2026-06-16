@@ -1,0 +1,29 @@
+# One-shot Job that creates the lake bucket. The medallion layers
+# (landing/bronze/silver/gold/control) are key PREFIXES inside this bucket and
+# materialize when objects are written — mirrors docker-compose's minio-init.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-bucket-init
+  namespace: lakehouse
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              until mc alias set local http://minio.lakehouse.svc.cluster.local:9000 \
+                    "$LAKE_S3_ACCESS_KEY" "$LAKE_S3_SECRET_KEY"; do
+                echo "waiting for minio..."; sleep 3
+              done
+              mc mb --ignore-existing local/lakehouse
+              echo "Bucket layout ready: s3://lakehouse/{landing,bronze,silver,gold,control}"
+          envFrom:
+            - secretRef:
+                name: minio-creds
