@@ -13,28 +13,37 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="${1:-$HERE/../databricks_lakehouse}"
 
-if [[ ! -d "$SRC/src/lakehouse" ]]; then
-  echo "ERROR: source project not found at: $SRC" >&2
-  echo "Pass the path explicitly: scripts/sync-lakehouse.sh /path/to/databricks_lakehouse" >&2
-  exit 1
+# The package + registry + generator + init_ods.sql are VENDORED IN (committed),
+# so this project builds standalone. When the databricks_lakehouse sibling is
+# present we refresh those files from it (steps 1-4); when it isn't, we skip the
+# refresh and build from the committed copies. Either way we re-render the
+# file-derived ConfigMaps (step 5) from whatever is on disk.
+if [[ -d "$SRC/src/lakehouse" ]]; then
+  echo "Refreshing vendored lakehouse files from: $SRC"
+
+  # 1. The package (verbatim).
+  mkdir -p "$HERE/lakehouse/src"
+  rsync -a --delete \
+    --exclude '__pycache__' --exclude '*.pyc' \
+    "$SRC/src/lakehouse/" "$HERE/lakehouse/src/lakehouse/"
+
+  # 2. The table registry (verbatim) — drives dynamic DAG tasks AND Spark jobs.
+  cp "$SRC/config/table_registry.yaml" "$HERE/lakehouse/config/table_registry.yaml"
+
+  # 3. The data generator (verbatim) — reused by the seed Job.
+  cp "$SRC/scripts/generate_source_data.py" "$HERE/lakehouse/generate_source_data.py"
+
+  # 4. init_ods.sql (verbatim) — used by the shared Postgres init ConfigMap.
+  cp "$SRC/scripts/init_ods.sql" "$HERE/lakehouse/init_ods.sql"
+else
+  echo "Sibling project not found at $SRC — using committed (vendored) copies."
+  # Sanity-check the vendored snapshot is actually present before continuing.
+  if [[ ! -d "$HERE/lakehouse/src/lakehouse" ]]; then
+    echo "ERROR: no vendored package at lakehouse/src/lakehouse and no sibling" >&2
+    echo "project to sync from. Pass one: scripts/sync-lakehouse.sh /path/to/databricks_lakehouse" >&2
+    exit 1
+  fi
 fi
-
-echo "Syncing lakehouse package from: $SRC"
-
-# 1. The package (verbatim).
-mkdir -p "$HERE/lakehouse/src"
-rsync -a --delete \
-  --exclude '__pycache__' --exclude '*.pyc' \
-  "$SRC/src/lakehouse/" "$HERE/lakehouse/src/lakehouse/"
-
-# 2. The table registry (verbatim) — drives dynamic DAG tasks AND Spark jobs.
-cp "$SRC/config/table_registry.yaml" "$HERE/lakehouse/config/table_registry.yaml"
-
-# 3. The data generator (verbatim) — reused by the seed Job.
-cp "$SRC/scripts/generate_source_data.py" "$HERE/lakehouse/generate_source_data.py"
-
-# 4. init_ods.sql (verbatim) — used by the shared Postgres init ConfigMap.
-cp "$SRC/scripts/init_ods.sql" "$HERE/lakehouse/init_ods.sql"
 
 # 5. Render the file-derived ConfigMaps as STATIC manifests under k8s/config/.
 #    These wrap synced content (table_registry.yaml, init_ods.sql) so they are
