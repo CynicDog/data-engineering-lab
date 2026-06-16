@@ -1,0 +1,31 @@
+# Seed Job — populates the MinIO landing zone with synthetic Parquet, the same
+# way generate_source_data.py did locally (it's baked into the Spark image).
+# This is the "ADF -> ADLS landing" step the bronze pipeline ingests from.
+#
+# Writes for TODAY by default. Trigger ingest_bronze the same day so its {{ ds }}
+# matches the seeded dt= partition. Override the date by editing the args below
+# (e.g. add  "--dt", "2024-01-15").
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed-source-data
+  namespace: lakehouse
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: generate
+          image: lakehouse/spark:dev
+          imagePullPolicy: IfNotPresent
+          command: ["python3", "/opt/lakehouse/generate_source_data.py"]
+          args: ["--customers", "100"]
+          env:
+            - name: LAKE_S3_ENDPOINT
+              value: http://minio.lakehouse.svc.cluster.local:9000
+            - name: LAKE_BUCKET
+              value: lakehouse
+          envFrom:
+            - secretRef:
+                name: minio-creds

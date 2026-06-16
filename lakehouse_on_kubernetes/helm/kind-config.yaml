@@ -1,0 +1,18 @@
+# Kind cluster definition. extraPortMappings forward host ports to the node so
+# NodePort Services are reachable on localhost:
+#   localhost:8110 -> NodePort 30808  (Airflow UI / api-server)
+#   localhost:9031 -> NodePort 30901  (MinIO console)
+#
+# Create with:  kind create cluster --config helm/kind-config.yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: lakehouse
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30808
+        hostPort: 8110
+        protocol: TCP
+      - containerPort: 30901
+        hostPort: 9031
+        protocol: TCP

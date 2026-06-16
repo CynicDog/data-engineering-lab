@@ -1,0 +1,19 @@
+# Prod profile — Kubernetes (Kind) deployment.
+#
+# Same shape as dev.yaml with prod catalog names. In a real cluster the
+# credentials and endpoints would be supplied via env vars (sourced from a
+# Secret), which OVERRIDE the values below — never commit real secrets here.
+env: prod
+
+catalogs:
+  chan1: CHAN1P
+  chan2: CHAN2P
+  chan3: CHAN3P
+  chan4: CHAN4P
+
+lake_bucket: lakehouse
+s3_endpoint: http://minio.lakehouse.svc.cluster.local:9000
+s3_access_key: minioadmin
+s3_secret_key: minioadmin
+
+ods_url: postgresql+psycopg2://ods:ods@postgres.lakehouse.svc.cluster.local:5432/ods

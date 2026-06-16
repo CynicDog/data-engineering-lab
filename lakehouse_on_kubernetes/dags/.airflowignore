@@ -1,0 +1,3 @@
+# Helper module imported by the DAGs — not itself a DAG file.
+# (.airflowignore only skips DAG parsing; the module stays importable.)
+_spark_app.py

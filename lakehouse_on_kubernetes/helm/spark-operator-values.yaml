@@ -1,0 +1,31 @@
+# Values for the kubeflow/spark-operator chart.
+# Repo:  https://kubeflow.github.io/spark-operator
+# Pinned chart version is set in scripts/up.sh (SPARK_OPERATOR_CHART_VERSION).
+#
+# The operator watches the `lakehouse` namespace for SparkApplication CRDs and
+# launches driver/executor pods. We create the `spark` ServiceAccount + RBAC
+# ourselves (k8s/rbac/spark-rbac.yaml) for full control and version-independence,
+# so the chart must NOT create its own spark SA/RBAC (would collide on `spark`).
+
+# Namespaces whose SparkApplications this operator reconciles.
+spark:
+  jobNamespaces:
+    - lakehouse
+  serviceAccount:
+    # We manage the `spark` SA in k8s/rbac/spark-rbac.yaml.
+    create: false
+    name: spark
+  rbac:
+    # We manage the driver Role/RoleBinding too.
+    create: false
+
+# Admission webhook validates/mutates SparkApplications (sets defaults, mounts).
+webhook:
+  enable: true
+
+controller:
+  # Single replica is plenty for a local lab.
+  replicas: 1
+
+# The operator controller runs in its own namespace (helm install --namespace),
+# with chart-managed cluster RBAC for the controller itself.

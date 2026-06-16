@@ -1,0 +1,17 @@
+# MinIO root credentials == the S3A credentials Spark + the seed Job use.
+# Lab-only plaintext (stringData). In a real cluster these come from a secrets
+# manager (e.g. External Secrets / Vault), never committed.
+#
+# Keys are LAKE_S3_ACCESS_KEY / LAKE_S3_SECRET_KEY:
+#   * MinIO maps them to MINIO_ROOT_USER / MINIO_ROOT_PASSWORD
+#   * Spark pods map them to AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (S3A) and
+#     to LAKE_* (load_settings)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-creds
+  namespace: lakehouse
+type: Opaque
+stringData:
+  LAKE_S3_ACCESS_KEY: minioadmin
+  LAKE_S3_SECRET_KEY: minioadmin
