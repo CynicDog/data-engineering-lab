@@ -1,0 +1,72 @@
+# Namespace-level compute quota and default resource tier for the lakehouse namespace.
+#
+# TWO objects work together here:
+#
+# LimitRange — provides default resource requests/limits for any container
+#   that does not declare its own (Airflow Helm chart, MinIO, Postgres init
+#   jobs, etc.). Without this, a namespace ResourceQuota that covers CPU/memory
+#   will reject every pod that lacks explicit requests, including all of the
+#   Airflow control-plane pods.
+#
+# ResourceQuota — bounds total consumption across ALL pods in the namespace.
+#   Prevents a runaway Spark job or misconfigured profile from exhausting node
+#   memory and evicting control-plane pods.
+#
+# How the two interact:
+#   A pod with no resource declarations gets the LimitRange defaults applied
+#   before the ResourceQuota check runs. So the quota sees the defaults, not
+#   zero — and the pod is admitted as long as there is remaining quota capacity.
+#
+# Lab sizing (8GB Kind node, shared with host OS and control plane):
+#   Infra (Postgres + MinIO):  ~200m CPU / 512Mi memory
+#   Airflow control plane:     ~1-2 CPU / 2-3Gi memory (scheduler, api-server,
+#                               dag-processor, triggerer, statsd)
+#   Spark "small" profile:     ~1 CPU request / ~3Gi memory (1 driver + 4
+#                               executors max, dynamic allocation)
+#   Remaining headroom:        ~1 CPU / ~1.5Gi for burst / image pulls / etc.
+#
+# Adjust requests.cpu / requests.memory upward when running "medium" or "large"
+# profiles on a multi-node cluster.
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: lakehouse-default-limits
+  namespace: lakehouse
+spec:
+  limits:
+    - type: Container
+      # Defaults applied to any container that omits resource declarations.
+      # Airflow Helm chart containers, MinIO, Postgres, and init jobs all
+      # benefit from these so the ResourceQuota below can account for them.
+      default:
+        cpu: "500m"
+        memory: "512Mi"
+      defaultRequest:
+        cpu: "100m"
+        memory: "128Mi"
+      # Hard ceiling per individual container — prevents a single container
+      # from claiming the entire namespace quota.
+      max:
+        cpu: "4"
+        memory: "8Gi"
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: lakehouse-compute-quota
+  namespace: lakehouse
+spec:
+  hard:
+    # CPU: 8 cores request ceiling covers Airflow (~2) + Spark small (~1) +
+    # infra (~0.5) with generous headroom for the lab.
+    requests.cpu: "8"
+    limits.cpu: "16"
+    # Memory: 12Gi request ceiling. Airflow control plane ~3Gi + Spark small
+    # ~3Gi + infra ~0.5Gi = ~6.5Gi; 12Gi leaves room for image pulls and bursts.
+    requests.memory: 12Gi
+    limits.memory: 24Gi
+    # Pod ceiling: Airflow (~8 pods) + Spark (1 driver + 4 executors per job,
+    # up to 4 concurrent tasks) + infra (~4) = ~32; 50 gives headroom.
+    pods: "50"
+    count/sparkapplications.sparkoperator.k8s.io: "10"

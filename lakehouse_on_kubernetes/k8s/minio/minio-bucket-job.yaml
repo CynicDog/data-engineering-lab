@@ -24,6 +24,13 @@ spec:
               done
               mc mb --ignore-existing local/lakehouse
               echo "Bucket layout ready: s3://lakehouse/{landing,bronze,silver,gold,control}"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
           envFrom:
             - secretRef:
                 name: minio-creds

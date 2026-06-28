@@ -25,7 +25,9 @@ trigger: ## Unpause + trigger the ingest_bronze DAG (chains silver -> gold via a
 	$(KUBECTL) exec deploy/airflow-scheduler -n $(NS) -- \
 	  bash -lc 'airflow dags unpause ingest_bronze && \
 	            airflow dags unpause transform_silver && \
-	            airflow dags unpause build_gold && \
+	            airflow dags unpause build_gold_voc_daily && \
+	            airflow dags unpause build_gold_policy_summary && \
+	            airflow dags unpause build_gold_claims_analysis && \
 	            airflow dags trigger ingest_bronze'
 
 status: ## Show pods + SparkApplications

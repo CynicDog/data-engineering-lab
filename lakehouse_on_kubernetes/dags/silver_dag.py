@@ -11,6 +11,8 @@ gold DAG depends on.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from airflow.providers.cncf.kubernetes.operators.spark_kubernetes import (
     SparkKubernetesOperator,
 )
@@ -66,7 +68,7 @@ derived columns, all driven by `config/table_registry.yaml`.
                 SparkKubernetesOperator(
                     task_id=f"silver_{ch.name}_{spec.name}",
                     namespace=NAMESPACE,
-                    application_file=render_silver(ch.name, spec.name),
+                    application_file=render_silver(ch.name, spec.name, profile="small"),
                     # In-cluster service-account credentials; no Airflow
                     # connection is involved. See bronze_dag.
                     kubernetes_conn_id=None,
@@ -75,6 +77,7 @@ derived columns, all driven by `config/table_registry.yaml`.
                     do_xcom_push=False,
                     outlets=[SILVER_ASSETS[(ch.name, spec.name)]],
                     retries=1,
+                    execution_timeout=timedelta(minutes=30),
                 )
 
     return transform_silver()

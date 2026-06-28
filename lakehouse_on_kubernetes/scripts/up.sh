@@ -29,20 +29,44 @@ echo "==> [4/8] Namespace, secret, configmaps (static manifests)"
 kc apply -f "$ROOT/k8s/namespace.yaml"
 kc apply -f "$ROOT/k8s/config/"
 
-# 5. RBAC + Postgres + MinIO.
-echo "==> [5/8] RBAC, Postgres, MinIO"
+# 5. RBAC + ResourceQuota + Postgres + MinIO.
+echo "==> [5/8] RBAC, ResourceQuota, Postgres, MinIO"
 kc apply -f "$ROOT/k8s/rbac/"
+kc apply -f "$ROOT/k8s/resource-quota.yaml"
 kc apply -f "$ROOT/k8s/postgres/postgres.yaml"
 kc apply -f "$ROOT/k8s/minio/minio.yaml"
 
-echo "    waiting for Postgres + MinIO to be ready..."
-kc rollout status deploy/postgres -n "$NAMESPACE" --timeout=180s
-kc rollout status deploy/minio -n "$NAMESPACE" --timeout=180s
+echo "    waiting for Postgres + MinIO to be ready (up to 5 min each)..."
+_wait_deploy() {
+  local deploy=$1 elapsed=0 interval=10 limit=300
+  until kc rollout status deploy/"$deploy" -n "$NAMESPACE" --timeout="${interval}s" 2>/dev/null; do
+    elapsed=$(( elapsed + interval ))
+    if [ "$elapsed" -ge "$limit" ]; then
+      echo "ERROR: $deploy not ready after ${limit}s — check: kubectl describe pod -n $NAMESPACE -l app=$deploy"
+      exit 1
+    fi
+    echo "    still waiting for $deploy (${elapsed}s elapsed)..."
+  done
+}
+_wait_deploy postgres
+_wait_deploy minio
 
 # 6. Create the lake bucket.
 echo "==> [6/8] Creating lake bucket"
 kc apply -f "$ROOT/k8s/minio/minio-bucket-job.yaml"
-kc wait --for=condition=complete job/minio-bucket-init -n "$NAMESPACE" --timeout=120s
+_wait_job() {
+  local job=$1 elapsed=0 interval=10 limit=300
+  until kc wait --for=condition=complete job/"$job" -n "$NAMESPACE" --timeout="${interval}s" 2>/dev/null; do
+    elapsed=$(( elapsed + interval ))
+    if [ "$elapsed" -ge "$limit" ]; then
+      echo "ERROR: job/$job did not complete after ${limit}s"
+      echo "       Logs: kubectl logs -n $NAMESPACE job/$job"
+      exit 1
+    fi
+    echo "    still waiting for job/$job (${elapsed}s elapsed)..."
+  done
+}
+_wait_job minio-bucket-init
 
 # 7. Spark Operator.
 echo "==> [7/8] Installing Spark Operator (chart $SPARK_OPERATOR_CHART_VERSION)"
@@ -63,8 +87,12 @@ helm --kube-context "kind-${CLUSTER_NAME}" upgrade --install airflow \
   apache-airflow/airflow \
   --version "$AIRFLOW_CHART_VERSION" \
   --namespace "$NAMESPACE" \
-  -f "$ROOT/helm/airflow-values.yaml" \
-  --wait --timeout 10m
+  -f "$ROOT/helm/airflow-values.yaml"
+
+echo "    waiting for Airflow control plane (up to 5 min each)..."
+_wait_deploy airflow-scheduler
+_wait_deploy airflow-dag-processor
+_wait_deploy airflow-api-server
 
 cat <<EOF
 

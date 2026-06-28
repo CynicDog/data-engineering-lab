@@ -14,7 +14,7 @@ table is one YAML entry, zero DAG code changes.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from airflow.providers.cncf.kubernetes.operators.spark_kubernetes import (
     SparkKubernetesOperator,
@@ -79,7 +79,7 @@ landing zone and writing partitioned Delta to bronze.
                 SparkKubernetesOperator(
                     task_id=f"ingest_{ch.name}_{spec.name}",
                     namespace=NAMESPACE,
-                    application_file=render_bronze(ch.name, spec.name),
+                    application_file=render_bronze(ch.name, spec.name, profile="small"),
                     # The worker pod runs in-cluster under a service account that
                     # already carries Kubernetes API credentials, so the operator
                     # talks to the API directly. conn_id=None selects in-cluster
@@ -90,6 +90,10 @@ landing zone and writing partitioned Delta to bronze.
                     do_xcom_push=False,
                     outlets=[BRONZE_ASSETS[(ch.name, spec.name)]],
                     retries=2,
+                    # Guard against a hung SparkApplication that never reaches
+                    # a terminal state — prevents the bronze serial queue from
+                    # stalling indefinitely and blocking every downstream task.
+                    execution_timeout=timedelta(minutes=30),
                 )
 
     return ingest_bronze()

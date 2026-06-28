@@ -7,6 +7,12 @@
 # local_settings that crashes on our Airflow 3 image.
 airflowVersion: "3.0.2"
 
+# Static secret prevents JWT invalidation when the Helm release is upgraded
+# (a dynamically generated key rotates on every helm upgrade, causing all
+# in-flight worker pods to fail with "Signature verification failed").
+# This is a lab cluster — not a production secret; don't copy this value.
+webserverSecretKey: "cc13e0799a293e3c35aec1e2cec8b517cacafd0a1c980dd56087f2458d073c1a"
+
 # Each task runs in its own worker pod (production-faithful). The heavy compute
 # is in Spark Operator pods regardless; these workers just submit + watch the CRD.
 executor: KubernetesExecutor
@@ -160,9 +166,34 @@ workers:
     limits:
       memory: 1Gi
 
+# The scheduler and dag-processor both parse DAG files and run the task state
+# machine. Without explicit limits these containers inherit the LimitRange
+# default of 512Mi, which the dag-processor reliably OOMs on at startup.
+scheduler:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+
+dagProcessor:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+
 # Run the triggerer (enables deferrable operators later, if desired).
 triggerer:
   enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
 
 # We use SimpleAuthManager (above), so the FAB "create default user" job is not
 # applicable — it runs `airflow users create`, which doesn't exist under simple
