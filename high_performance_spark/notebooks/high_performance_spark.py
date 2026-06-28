@@ -14,9 +14,10 @@ def _():
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # DataFrames, Datasets, and Spark SQL
+    # High Performance Spark — Lab Notebook
 
-    Notes and runnable Python translations from *High Performance Spark*, Ch. 5.
+    Runnable Python translations from *High Performance Spark* (Karau & Warren).
+    Covers Ch. 5 (DataFrames, Datasets, and Spark SQL) and Ch. 6 (Joins).
     """)
     return
 
@@ -24,7 +25,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Setup
+    ## 1. Setup
 
     This notebook boots a local `SparkSession` against a pinned JDK 17 (Temurin).
     The shell default JDK on this machine is 25, which Spark 4 does not officially support — so we override `JAVA_HOME` *before* importing `pyspark`.
@@ -112,7 +113,7 @@ def _(mo, spark):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Basics of Schemas
+    ## 2. Basics of Schemas
 
     The **schema** — and the optimizer work it unlocks — is one of the core differences between Spark SQL and the core (RDD) API. Inspecting it is especially useful for DataFrames, because there's no templated static type to read off in source the way there is with RDDs or (in Scala/Java) `Dataset[T]`.
 
@@ -131,7 +132,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Inspecting a schema — `printSchema()` vs `.schema`
+    ### 2.1. Inspecting a schema
 
     Two views, two audiences:
 
@@ -144,8 +145,6 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    #### Inferred from JSON
-
     A single JSON record with a nested array of structs — schema inferred at read time.
     """)
     return
@@ -179,8 +178,6 @@ def _(spark):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    #### Programmatic — `df.schema`
-
     `df.schema` returns a `StructType` made of `StructField`s. Each field carries a name, a `DataType`, and a `nullable` flag (plus optional metadata). `StructType` itself is a `DataType`, which is what lets schemas nest — same idea as a Scala case class containing other case classes.
 
     For comparison, the Scala definition of `StructField` itself:
@@ -205,7 +202,7 @@ def _(df_otters):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Building a schema by hand
+    ### 2.2. Building a schema by hand
 
     The same shape as above, written explicitly. This is what you reach for when you don't trust inference (heterogeneous JSON, missing fields, costly scans), or when you want to lock down nullability.
     """)
@@ -261,7 +258,7 @@ def _(spark):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### `@dataclass` as the `case class` analog
+    ### 2.3. `@dataclass` as the `case class` analog
 
     Python `@dataclass` declarations let you define record shapes in code, much like Scala case classes. PySpark can build a DataFrame from a list of dataclass instances directly; for nested fields it's safer to also pass the explicit `schema=` so inference doesn't have to climb generic type hints.
 
@@ -306,7 +303,7 @@ def _(otter_schema, spark):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Complex Spark SQL types
+    ### 2.4. Complex Spark SQL types
 
     | Python type   | Spark SQL type                                          | What it is                                                                                       | Example                                                                                                          |
     |---------------|---------------------------------------------------------|--------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
@@ -322,7 +319,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## DataFrame API
+    ## 3. DataFrame API
 
     The DataFrame API lets you work with structured data without registering temp views or hand-writing SQL strings — though both are still available, and we'll show below where the SQL-string form is actually nicer.
 
@@ -336,7 +333,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Eager schema in action
+    ### 3.1. Eager schema in action
 
     A quick demo. The `select` call resolves column names against the schema *immediately*; no action is needed to surface the error.
     """)
@@ -358,7 +355,7 @@ def _(df_otters):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### A flat otter dataset for the rest of this section
+    ### 3.2. A flat otter dataset for the rest of this section
 
     `df_otters` from the JSON example has a single row with a nested array of otters. To make filters and aggregations readable, we'll build a small **flat** DataFrame here — one otter per row — and use it for the remaining examples.
     """)
@@ -405,7 +402,7 @@ def _(spark):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Three ways to reference a column
+    ### 3.3. Three ways to reference a column
 
     Three idiomatic forms — all return the same `Column` object, each has a different ergonomic sweet spot:
 
@@ -445,7 +442,7 @@ def _(otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Filtering — the unhappy otters
+    ### 3.4. Filtering — the unhappy otters
 
     Three idiomatic spellings, pick by readability:
     """)
@@ -468,7 +465,7 @@ def _(F, otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Python operator gotchas
+    ### 3.5. Python operator gotchas
 
     Three pitfalls that bite every PySpark user at least once:
 
@@ -496,7 +493,7 @@ def _(F, otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### A complex filter — multi-column, with array indexing
+    ### 3.6. A complex filter — multi-column, with array indexing
 
     Combine boolean logic and nested-element access in one predicate. Note the parens-around-each-comparison rule from above is doing real work here.
     """)
@@ -515,7 +512,7 @@ def _(F, otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### When SQL strings beat the Column DSL
+    ### 3.7. When SQL strings beat the Column DSL
 
     `filter` and `selectExpr` accept SQL strings. The Column DSL is great inside Python code; SQL strings shine when the predicate **isn't known at code-write time** — driven from config, a UI, or a rules table. Both go through the same Catalyst optimizer, so there's no perf difference.
     """)
@@ -532,7 +529,7 @@ def _(otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Reading the optimizer with `.explain()`
+    ### 3.8. Reading the optimizer with `.explain()`
 
     The DSL story ("Catalyst can see your filter, so it can push down") is abstract until you see the plan. `.explain()` prints the parsed → analyzed → optimized → physical plan — and on real file-backed sources you'll see `PushedFilters` in the physical plan when the predicate makes it down to the scan.
 
@@ -552,7 +549,7 @@ def _(F, otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Built-in functions — `pyspark.sql.functions`
+    ### 3.9. Built-in functions
 
     The DSL operators (`+`, `==`, `~`, `&`, …) cover row-level arithmetic and logic. Anything fancier — literals, arrays, math, strings, dates, JSON, hashing, windows — lives in `pyspark.sql.functions`, conventionally aliased to `F`.
 
@@ -578,7 +575,7 @@ def _(F, spark):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Array functions — `array_contains`, `sort_array`, `explode`
+    ### 3.10. Array functions
 
     These are some of the most useful functions when working with self-describing data (JSON, Parquet with arrays). `explode` in particular is what we'd use to flatten the original nested `df_otters` into something shaped like `otters_flat` — a far more common move in real pipelines than constructing the flat schema by hand.
     """)
@@ -608,7 +605,7 @@ def _(F, otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    #### Bonus — flattening `df_otters` the way you actually would
+    ### 3.11. Flattening nested columns
 
     Round-tripping the original nested JSON DataFrame into something flat with `explode` + struct projection. Far more idiomatic than reconstructing a flat schema by hand.
     """)
@@ -637,7 +634,7 @@ def _(F, df_otters):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Operator & function quick reference (Python)
+    ### 3.12. Operator & function quick reference (Python)
 
     The names that actually show up in Python code, paired with their `Column`-method aliases:
 
@@ -674,7 +671,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Producing new columns — `select` and `withColumn`
+    ## 4. select and withColumn
 
     Filtering thins rows out; `select` and `withColumn` give you new or updated columns. Both accept the same `Column` expression syntax used in `filter` — so anything you can put in a predicate, you can use to compute a value.
 
@@ -709,7 +706,7 @@ def _(F, df_otters):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### `withColumn` — additive form
+    ### 4.1. `withColumn` — additive form
 
     Same expression, applied additively to `otters_flat`. Notice the column comes out at the end and the rest of the schema is untouched.
     """)
@@ -729,7 +726,7 @@ def _(F, otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Aliasing — taming auto-generated names
+    ### 4.2. Aliasing — taming auto-generated names
 
     Without `.alias(...)`, computed columns get auto-named like `(attributes[0] / attributes[1])`. After a few transforms those names become unreadable and impossible to reference later. Always alias derived columns at the point you compute them.
     """)
@@ -748,7 +745,7 @@ def _(F, otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Conditional values — `when` / `otherwise`
+    ## 5. when / otherwise
 
     Sometimes the cleanest way to express a derived column is if/else. `F.when(cond, value)` returns a partial expression you can chain with `.when(...)` for else-if branches and close with `.otherwise(default)`. Without an `otherwise`, unmatched rows get `null`.
     """)
@@ -773,7 +770,7 @@ def _(F, otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Missing and noisy data
+    ## 6. Missing and noisy data
 
     Real data has nulls and `NaN`s. The DSL has dedicated tools so you don't end up sprinkling `if x is None` everywhere.
 
@@ -816,7 +813,7 @@ def _(F, spark):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### `df.na` shortcuts
+    ### 6.1. `df.na` shortcuts
     """)
     return
 
@@ -831,7 +828,7 @@ def _(noisy):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Beyond row-by-row — `dropDuplicates`
+    ## 7. dropDuplicates
 
     `filter` decides per row in isolation. `dropDuplicates` needs to *compare* rows, which means a shuffle — much more expensive than `filter`. Two flavors:
 
@@ -853,7 +850,7 @@ def _(otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Aggregates and `groupBy`
+    ## 8. Aggregates
 
     `groupBy` returns a `GroupedData` handle. Pick one of two paths:
 
@@ -886,7 +883,7 @@ def _(F, otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Whole-DataFrame summaries — `describe` and `summary`
+    ### 8.1. describe and summary
 
     For a quick look at numeric columns, `describe` gives count/mean/stddev/min/max. The newer `summary` is more flexible — pass any subset of `count`, `mean`, `stddev`, `min`, `max`, plus arbitrary percentiles like `"50%"`, `"95%"`.
     """)
@@ -904,7 +901,7 @@ def _(F, otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Aggregate function quick reference
+    ### 8.2. Aggregate function quick reference
 
     | Function                                | Purpose                                                         |
     |-----------------------------------------|-----------------------------------------------------------------|
@@ -926,7 +923,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Rollup and cube — subtotals in one pass
+    ## 9. Rollup and cube
 
     `groupBy(a, b)` gives you one row per `(a, b)` combination — that's it. Dashboards usually want **subtotals too**: totals per `a`, per `b`, and a grand total. You can union three separate aggregates, or use `rollup` / `cube` to compute all of them in a single shuffle.
 
@@ -972,7 +969,7 @@ def _(F, otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Labelling subtotal rows with `grouping_id`
+    ### 9.1. grouping_id
 
     `F.grouping_id(*cols)` returns a bitmap that tells you, per row, which of the grouping columns were aggregated away. For `cube(zip, species)`:
 
@@ -998,7 +995,7 @@ def _(F, otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Pivot and unpivot
+    ## 10. Pivot and unpivot
 
     `pivot` turns a column's distinct values into new columns, often dramatically reshaping the result. It's expensive — Spark needs to either know the pivot values up front (cheap) or scan once to discover them (extra pass), then aggregate per pivoted column.
 
@@ -1019,7 +1016,7 @@ def _(F, otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Unpivot via `melt`
+    ### 10.1. Unpivot via `melt`
 
     Spark 3.4+ exposes `DataFrame.melt(ids, values, variableColumnName, valueColumnName)` for the inverse: collapse columns back into rows.
     """)
@@ -1048,7 +1045,7 @@ def _(F, otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Windowing
+    ## 11. Windowing
 
     Aggregates collapse a group into a single row. **Window functions** keep one row per input but compute a value over a *frame* of related rows — the canonical use cases are running totals, rankings, moving averages, lag/lead diffs.
 
@@ -1090,7 +1087,7 @@ def _(F, otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Ranking and deduplication via window
+    ### 11.1. Ranking via window
 
     `row_number`, `rank`, and `dense_rank` are window-only. They're also the answer to *deterministic* `dropDuplicates`: rank rows within an `id` partition by the column you care about, then keep `row_number == 1`.
     """)
@@ -1109,7 +1106,7 @@ def _(F, Window, otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Sorting and limiting
+    ## 12. Sorting and limiting
 
     `orderBy` (alias: `sort`) takes any number of `Column.asc()` / `Column.desc()` expressions and is stable. `nullsFirst()` / `nullsLast()` are explicit options on the column when nulls matter for ranking.
 
@@ -1130,7 +1127,7 @@ def _(F, otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Multi-DataFrame set-like operations
+    ## 13. Set operations
 
     These take two same-shape DataFrames and combine them. Cost varies wildly — pick by intent:
 
@@ -1163,7 +1160,7 @@ def _(F, otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Plain SQL and the catalog
+    ## 14. Plain SQL
 
     Anything you can express with the DataFrame DSL, you can express in SQL — and vice-versa. The two go through the same Catalyst optimizer, so the choice is purely ergonomic.
 
@@ -1196,7 +1193,7 @@ def _(otters_flat, spark):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### `selectExpr` and `expr`
+    ### 14.1. `selectExpr` and `expr`
 
     `selectExpr` is `select` whose arguments are SQL strings. `F.expr("…")` does the same inside any DSL call site that takes a `Column`.
     """)
@@ -1222,7 +1219,7 @@ def _(F, otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Querying file paths directly
+    ### 14.2. Querying file paths directly
 
     For one-off scans, you don't even need a view — point SQL at a file/folder via the file format alias:
 
@@ -1240,7 +1237,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Data Loading and Saving
+    ## 15. I/O
 
     Spark SQL has its own I/O layer — `DataFrameReader` (`spark.read`) and `DataFrameWriter` (`df.write`) — separate from the core `SparkContext` file APIs. The reason is pushdown: if the optimizer understands what format and predicate you have, it can ask the storage layer to skip reading unnecessary rows or columns before any data enters the JVM. That contract only works if both sides speak the same language.
     """)
@@ -1250,7 +1247,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### JSON — schema inference and `samplingRatio`
+    ### 15.1. JSON
 
     JSON carries no schema contract, so Spark samples records at read time to infer one. The default samples a fraction — enough to be fast, not enough to be certain on heterogeneous files.
 
@@ -1300,7 +1297,7 @@ def _(json_path, spark):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Parquet — reading and writing
+    ### 15.2. Parquet
 
     Parquet is Spark SQL's home format: columnar, splittable, self-describing, and understood by nearly every query engine in the data stack. A few options that matter in practice:
 
@@ -1338,7 +1335,7 @@ def _(parquet_path, spark):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Save modes
+    ### 15.3. Save modes
 
     By default, writing to an existing path raises an exception — the same behaviour as core Spark's RDD writes. Specify a mode to change that:
 
@@ -1358,7 +1355,7 @@ def _(mo):
 def _(parquet_path, spark):
     extra = spark.createDataFrame(
         [(5, "94110", "red", True, 0.9), (6, "10001", "giant", False, 0.1)],
-        "id INT, zip STRING, species STRING, happy BOOLEAN, score DOUBLE",
+        "id LONG, zip STRING, species STRING, happy BOOLEAN, score DOUBLE",
     )
     extra.write.mode("append").format("parquet").save(parquet_path)
 
@@ -1370,7 +1367,7 @@ def _(parquet_path, spark):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Partitioned writes — `partitionBy`
+    ### 15.4. Partitioned writes
 
     When you know your downstream readers will filter by a column, write the data partitioned on that column. Spark creates one subdirectory per distinct value (`zip=94110/`, `zip=10001/`, …), and any query with a `WHERE zip = '94110'` predicate will skip opening files in every other directory — **partition pruning**, and it is completely free.
 
@@ -1411,7 +1408,7 @@ def _(spark):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    #### Partition pruning in the physical plan
+    ### 15.5. Partition pruning
 
     Filter on the partition column and look for `PartitionFilters` in the `FileScan` line of the physical plan. Parquet files outside the matching partition directories are never opened.
     """)
@@ -1429,7 +1426,7 @@ def _(F, df_partitioned):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### From local collections and to RDDs
+    ### 15.6. Local collections and RDDs
 
     `spark.createDataFrame(rows, schema)` distributes in-memory data as a DataFrame — the same pattern used throughout this notebook for sample data. Useful for unit tests, reference tables, and small lookup datasets that need to join against large distributed data.
 
@@ -1474,7 +1471,7 @@ def _(spark):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## UDFs — extending Spark SQL with Python functions
+    ## 16. UDFs
 
     When the built-in `pyspark.sql.functions` don't cover your case, you can register a Python function as a UDF and use it anywhere a `Column` expression is accepted.
 
@@ -1520,7 +1517,7 @@ def _(F, otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Pandas UDFs — vectorized, much lower overhead
+    ### 16.1. Pandas UDFs
 
     A pandas UDF receives a `pd.Series` (or `pd.DataFrame` for multi-column inputs) instead of one value at a time. Spark transfers data in Apache Arrow columnar batches, so the per-row serialization cost collapses into a per-batch cost. For compute-heavy custom logic, pandas UDFs are the right Python-native choice.
 
@@ -1546,7 +1543,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Query Optimizer — Catalyst
+    ## 17. Query Optimizer
 
     Every DataFrame transformation builds a **logical plan** — a tree of relational operators (Project, Filter, Join, Aggregate, …). Catalyst optimizes that tree in several passes before producing a **physical plan** that Spark actually executes.
 
@@ -1579,7 +1576,7 @@ def _(F, otters_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    #### What to look for in the plan
+    What to look for:
 
     - **Optimized logical plan** — the `Filter(happy)` moved as close to the `LocalRelation` scan as possible (pre-aggregation filtering reduces the rows that reach the `groupBy`). The post-aggregation filter on `avg_attr0` stays above — correctly, because it depends on the aggregate result.
     - **Physical plan** — look for `HashAggregate` appearing *twice*: a partial aggregate on each partition (before the shuffle) and a final aggregate after. That's Catalyst rewriting a naïve group-then-reduce into a combiner pattern — the same transformation that makes `groupBy` safe on DataFrames but dangerous on RDDs.
@@ -1591,7 +1588,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Filter pushdown — seeing it in the physical plan
+    ### 17.1. Filter pushdown
 
     With a Parquet-backed source, predicates on primitive columns are pushed to the Parquet row-group statistics. The physical plan makes this concrete.
     """)
@@ -1622,7 +1619,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Static optimizer rules — the broad categories
+    ### 17.2. Static optimizer rules
 
     Catalyst's static rules (the ones that run before the job starts, visible in `explain`) fall into three rough families:
 
@@ -1640,7 +1637,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Adaptive Query Execution (AQE)
+    ### 17.3. Adaptive Query Execution (AQE)
 
     AQE is Catalyst's runtime counterpart. Static rules run before the job starts; AQE runs *during* the job, re-optimizing based on what the data actually looks like at each shuffle boundary.
 
@@ -1652,6 +1649,473 @@ def _(mo):
     AQE is on by default since Spark 3.2. You won't see it in `explain()` output because `explain()` is pre-execution. Run the job and check the Spark UI's SQL tab for the finalized adaptive plan.
 
     > **One known pitfall.** AQE can attempt to match output partitioning to a target table's partition layout. For skewed data, that undoes careful pre-shuffle work and can cause severe performance regressions. In Iceberg the escape hatch is setting the table property `write.distribution-mode = none` at write time.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 18. Joins
+
+    Joining data is one of the most common — and most expensive — operations in a Spark pipeline. Understanding joins requires distinguishing two separate concepts that are easy to conflate:
+
+    - **Join type** — the *logical* operation: inner, left outer, right outer, full outer, left semi, left anti. The join type determines *which rows appear in the result*.
+    - **Join execution technique** — *how* Spark physically computes the join: broadcast hash, shuffle hash, shuffle sort-merge, etc. The technique determines *how much data moves over the network* and therefore the performance.
+
+    The join type is fixed by your logic. The execution technique is chosen by Spark based on data sizes, known partitioners, configuration, and any hints you provide. The rest of this chapter walks through both dimensions.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### 18.1. Core Spark Joins
+
+    RDD-level joins require that records sharing a key end up on the same executor so they can be combined locally. If Spark does not already know how the RDDs are partitioned, it must shuffle at least one of them first.
+
+    Three scenarios, ordered from most to least expensive:
+
+    | Scenario | What happens | Network cost |
+    |---|---|---|
+    | Neither RDD has a known partitioner | Both sides shuffle — a **shuffle join** | Full cross-network sort |
+    | One RDD has a known partitioner | The other shuffles to match it | One-sided shuffle |
+    | Both share the same partitioner *and* were materialized in the same action | Data is already **co-located** on the same executor | Zero network transfer |
+
+    > **Tip.** Two RDDs are co-located only when they share the same partitioner *and* were shuffled as part of the same action. Having the same partitioner without co-location still avoids a shuffle but not the network transfer.
+
+    The cost of a join scales with the number of keys and the distance records must travel to reach their target partition. Keeping that product small is the central performance lever for RDD joins.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### 18.2. RDD join patterns
+
+    The default join in Spark is an **inner join** — only keys present in both RDDs appear in the result. When both sides have duplicates, the result is the full cross-product of matching records, which can cause dramatic data expansion.
+
+    Three practical guidelines before you write a join:
+
+    1. **Duplicate keys → reduce first.** If one or both RDDs contain multiple values per key, `reduceByKey` or `combineByKey` before the join. Joining first and reducing after means shuffling all the duplicates, only to throw most of them away. If the original RDD had *N* records per key, you shuffle *N* times more data than necessary.
+
+    2. **Missing keys → prefer outer join.** An inner join silently drops rows whose key is absent from the other side. Using `leftOuterJoin` (or `rightOuterJoin` / `fullOuterJoin`) keeps those rows with `None` values, making the missing data visible rather than invisible.
+
+    3. **Key subset → filter before joining.** If only a subset of the keys in the large RDD will ever match the small RDD, filter the large RDD down first. You reduce the shuffle volume for data you would discard anyway.
+
+    > **Tip.** Join is one of the most expensive operations you will commonly use in Spark. Shrinking your data *before* the join — by reducing, filtering, or repartitioning — pays for itself immediately in reduced shuffle and memory pressure.
+    """)
+    return
+
+
+@app.cell
+def _(spark):
+    # (otter_id, score) — three scores for otter 1, two for otter 2, one for otter 3
+    score_rdd = spark.sparkContext.parallelize([
+        (1, 0.4), (1, 0.9), (1, 0.2),
+        (2, 0.7), (2, 0.3),
+        (3, 0.6),
+    ])
+
+    # (otter_id, zip) — otter 4 has an address but no scores
+    address_rdd = spark.sparkContext.parallelize([
+        (1, "94110"),
+        (2, "10001"),
+        (4, "M1B 5K7"),
+    ])
+    return address_rdd, score_rdd
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    The book contrasts two implementations that produce the same result — the best score per otter paired with its address — but with very different shuffle costs.
+
+    ```scala
+    // Scala, Example 6-1 — join first, reduce after (expensive)
+    val joinedRDD = scoreRDD.join(addressRDD)
+    joinedRDD.reduceByKey((x, y) => if (x._1 > y._1) x else y)
+
+    // Scala, Example 6-2 — reduce first, join after (cheap)
+    val bestScoreData = scoreRDD.reduceByKey((x, y) => if (x > y) x else y)
+    bestScoreData.join(addressRDD)
+    ```
+
+    The second approach shuffles only one row per key instead of all duplicates. If each otter had 1 000 scores the first shuffle would be 1 000× larger than necessary.
+    """)
+    return
+
+
+@app.cell
+def _(address_rdd, score_rdd):
+    # Approach 1 — join then reduce: shuffles all duplicate score rows
+    joined_first = score_rdd.join(address_rdd)
+    best_via_join_first = joined_first.reduceByKey(lambda x, y: x if x[0] > y[0] else y)
+    print("join-then-reduce:", sorted(best_via_join_first.collect()))
+
+    # Approach 2 — reduce then join: only one row per key crosses the wire
+    best_score_rdd = score_rdd.reduceByKey(lambda a, b: a if a > b else b)
+    best_via_reduce_first = best_score_rdd.join(address_rdd)
+    print("reduce-then-join:", sorted(best_via_reduce_first.collect()))
+    # otter 3 has no address so it drops out of the inner join in both cases
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    `leftOuterJoin` guarantees every key from the left RDD appears in the result. When no matching key exists in the right RDD the value from the right side is `None` (Scala `Option` → Python `None`).
+
+    ```scala
+    // Scala, Example 6-3
+    val joinedRDD = scoreRDD.leftOuterJoin(addressRDD)
+    joinedRDD.reduceByKey((x, y) => if (x._1 > y._1) x else y)
+    ```
+
+    Spark also supports `rightOuterJoin` and `fullOuterJoin` depending on which side you need to preserve.
+    """)
+    return
+
+
+@app.cell
+def _(address_rdd, score_rdd):
+    outer_joined = score_rdd.leftOuterJoin(address_rdd)
+    # Each value is (score, Option[zip]) — None where address is absent
+    # otter 3 has scores but no address: zip comes back as None
+    print("left outer (score, zip?):")
+    for k, v in sorted(outer_joined.collect()):
+        print(f"  otter {k}: score={v[0]:.1f}, zip={v[1]}")
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### 18.3. RDD execution strategies
+
+    The default RDD join uses a **shuffle hash join**: Spark repartitions both RDDs with the same hash partitioner so records with the same key land on the same partition, then combines them locally. This always works but always costs at least one shuffle.
+
+    Two ways to avoid or reduce that cost:
+
+    **1. Assign a known partitioner before the join.** If you run an operation like `reduceByKey` *with an explicit partitioner* that matches the other RDD's partitioner, Spark recognises the shared partitioning and skips the second shuffle. The trick is to pass the partitioner as an argument to the pre-join aggregation:
+
+    ```scala
+    // Scala, Example 6-4
+    val addressDataPartitioner = addressRDD.partitioner
+      .getOrElse(new HashPartitioner(addressRDD.partitions.length))
+    val bestScoreData = scoreRDD.reduceByKey(addressDataPartitioner, (x, y) => if (x > y) x else y)
+    bestScoreData.join(addressRDD)
+    ```
+
+    **2. Broadcast hash join (manual in core Spark).** If one RDD fits in driver memory, collect it to a `Map`, broadcast that map to every executor, and combine with `mapPartitions` — zero shuffle. Covered in the next cell.
+    """)
+    return
+
+
+@app.cell
+def _(address_rdd, score_rdd):
+    # Pass the same numPartitions so both RDDs use a hash partitioner with the
+    # same number of buckets — Spark recognises the shared partitioning and
+    # skips the second shuffle when joining.
+    _n_parts = address_rdd.getNumPartitions()
+
+    best_score_partitioned = score_rdd.reduceByKey(
+        lambda a, b: a if a > b else b,
+        numPartitions=_n_parts,
+    )
+    result_known_partitioner = best_score_partitioned.join(address_rdd)
+    print("known-partitioner join:", sorted(result_known_partitioner.collect()))
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    #### 18.3.1. Manual broadcast hash join
+
+    Core Spark has no built-in broadcast join — but you can implement one manually. The pattern:
+
+    1. Collect the smaller RDD to the driver as a Python `dict`.
+    2. `sc.broadcast()` that dict so each executor holds exactly one copy.
+    3. Use `mapPartitions` on the large RDD to look up each key in the broadcast variable — no shuffle at all.
+
+    ```scala
+    // Scala, Example 6-5
+    def manualBroadcastHashJoin[K, V1, V2](bigRDD: RDD[(K, V1)], smallRDD: RDD[(K, V2)]) = {
+      val smallLocal = smallRDD.collectAsMap()
+      val bcast      = bigRDD.sparkContext.broadcast(smallLocal)
+      bigRDD.mapPartitions(iter => iter.flatMap { case (k, v1) =>
+        bcast.value.get(k).map(v2 => (k, (v1, v2)))
+      }, preservesPartitioning = true)
+    }
+    ```
+
+    The Python translation below mirrors the inner-join semantics: keys absent from the small RDD are dropped.
+    """)
+    return
+
+
+@app.cell
+def _(address_rdd, score_rdd, spark):
+    # Collect the small RDD to the driver
+    _small_local = dict(address_rdd.collectAsMap())
+
+    # Broadcast: one copy per executor, not one per task
+    _bcast = spark.sparkContext.broadcast(_small_local)
+
+    def _broadcast_join(big_rdd, bcast_var):
+        def _lookup(partition):
+            lookup = bcast_var.value
+            for k, v1 in partition:
+                v2 = lookup.get(k)
+                if v2 is not None:
+                    yield (k, (v1, v2))
+        return big_rdd.mapPartitions(_lookup, preservesPartitioning=True)
+
+    bcast_result = _broadcast_join(score_rdd, _bcast)
+    print("broadcast hash join:", sorted(bcast_result.collect()))
+    # otter 3 dropped (no address); otter 4 dropped (no score) — inner semantics
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### 18.4. Spark SQL Joins
+
+    Spark SQL supports the same join types as core Spark, but the optimizer does more work for you automatically:
+
+    - **Filter pushdown and reordering** — Catalyst can move predicates before a join, reducing the rows that enter the shuffle.
+    - **Automatic broadcast** — if one side is below `spark.sql.autoBroadcastJoinThreshold` (default ~10 MB), Spark broadcasts it without any hint from you.
+
+    The trade-off: you give up manual partitioner control. You cannot force co-location the way you can with RDDs, and you have less control over when shuffles happen.
+
+    The examples below use two small DataFrames that mirror Tables 6-1 and 6-2 from the book — a table of otters and sizes (left) and a table of otters and zip codes (right).
+    """)
+    return
+
+
+@app.cell
+def _(spark):
+    df_size = spark.createDataFrame(
+        [("Happy", 1.0), ("Sad", 0.9), ("Happy", 1.5), ("Coffee", 3.0)],
+        "name STRING, size DOUBLE",
+    )
+    df_zip = spark.createDataFrame(
+        [("Happy", "94110"), ("Happy", "94103"), ("Coffee", "10504"), ("Tea", "07012")],
+        "name STRING, zip STRING",
+    )
+    df_size.show()
+    df_zip.show()
+    return df_size, df_zip
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### 18.5. Join types
+
+    All six types share the same call signature: `df1.join(df2, condition, joinType)`.
+
+    | Join type | `joinType` string | What appears in the result |
+    |---|---|---|
+    | Inner | `"inner"` (default) | Only rows where the key exists in **both** tables |
+    | Left outer | `"left_outer"` or `"left"` | All rows from the left table; `null` fills missing right columns |
+    | Right outer | `"right_outer"` or `"right"` | All rows from the right table; `null` fills missing left columns |
+    | Full outer | `"full_outer"` or `"outer"` | All rows from both tables; `null` fills whichever side is absent |
+    | Left semi | `"left_semi"` | Left rows that **have** a matching key in the right — no right columns |
+    | Left anti | `"left_anti"` | Left rows that **do not** have a matching key in the right — no right columns |
+
+    > **Warning.** Duplicate keys multiply rows. "Happy" appears twice in `df_size` and twice in `df_zip`, so the inner join produces 2 × 2 = 4 "Happy" rows. If you were not expecting that cross-product, deduplicate before joining.
+    """)
+    return
+
+
+@app.cell
+def _(df_size, df_zip):
+    # Inner join — only keys present in both tables; Happy produces a cross-product
+    print("=== inner ===")
+    df_size.join(df_zip, df_size["name"] == df_zip["name"], "inner").show()
+    return
+
+
+@app.cell
+def _(df_size, df_zip):
+    _cond = df_size["name"] == df_zip["name"]
+
+    # Left outer — Sad has no zip; its right columns come back null
+    print("=== left outer ===")
+    df_size.join(df_zip, _cond, "left_outer").show()
+
+    # Right outer — Tea has no size; its left columns come back null
+    print("=== right outer ===")
+    df_size.join(df_zip, _cond, "right_outer").show()
+
+    # Full outer — both Sad (no zip) and Tea (no size) are preserved
+    print("=== full outer ===")
+    df_size.join(df_zip, _cond, "full_outer").show()
+    return
+
+
+@app.cell
+def _(df_size, df_zip):
+    _cond = df_size["name"] == df_zip["name"]
+
+    # Left semi — filter: keep left rows that have at least one match on the right
+    # No right-table columns in the result
+    print("=== left semi ===")
+    df_size.join(df_zip, _cond, "left_semi").show()
+
+    # Left anti — the complement: left rows with *no* match on the right
+    print("=== left anti ===")
+    df_size.join(df_zip, _cond, "left_anti").show()
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### 18.6. Self and cross joins
+
+    **Self joins** join a DataFrame against itself — useful for finding pairs, hierarchies, or distances within a single table. The catch is that both sides share the same column names, so you must alias the DataFrame before joining; otherwise column references are ambiguous.
+
+    ```scala
+    // Scala, Example 6-10
+    val joined = df.as("a").join(df.as("b")).where($"a.name" === $"b.name")
+    ```
+
+    **Cross joins** (cartesian product) pair every row on the left with every row on the right. A left table of *M* rows and a right table of *N* rows produces *M × N* rows in the result — with our four-row tables that is already 16 rows. On real datasets this explodes quickly.
+
+    > **Warning.** Spark requires an explicit `crossJoin` call (or `joinType="cross"`) rather than accidentally omitting a condition, precisely because the data explosion is so easy to trigger and so hard to recover from downstream.
+    """)
+    return
+
+
+@app.cell
+def _(df_size, df_zip):
+    import pyspark.sql.functions as _F
+
+    # Self join — find all (size_a, size_b) pairs for the same name
+    _self = (
+        df_size.alias("a")
+        .join(df_size.alias("b"), _F.col("a.name") == _F.col("b.name"))
+        .select(_F.col("a.name"), _F.col("a.size").alias("size_a"), _F.col("b.size").alias("size_b"))
+    )
+    print("=== self join ===")
+    _self.show()
+
+    # Cross join — every row paired with every row
+    _cross_count = df_size.crossJoin(df_zip).count()
+    print(f"cross join row count: {df_size.count()} × {df_zip.count()} = {_cross_count}")
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### 18.7. Equi vs non-equi joins
+
+    Spark distributes join work by routing rows with the same key to the same partition. This only works when the join condition is an **equality** on the join key — an **equi-join**. Equality lets Spark use hashing or sorting to guarantee co-location.
+
+    A **non-equi-join** (e.g., `>=`, `BETWEEN`, regex, or a UDF that itself makes the comparison) breaks that guarantee. Spark falls back to a nested-loop-style scan: every partition of one table is compared against every partition of the other. Cost grows as *O(M × N)* instead of *O(M + N)*.
+
+    There is a subtle but important distinction with UDFs:
+
+    - **Cheap (equi-join):** equality is on the *results* of a UDF — `udf_result(left) === udf_result(right)`. Spark applies the UDF per row and then uses the equality to route. Still an equi-join.
+    - **Expensive (non-equi-join):** the UDF *is* the comparison — `udf_comparing(left_col, right_col)`. Spark cannot use the output to partition; it must compare all pairs.
+
+    ```scala
+    // Scala, Example 6-11 — bad: UDF is the comparison (non-equi)
+    val sle = udf((s: String, s2: String) => s.length() == s2.length())
+    df1.joinWith(df2, sle(df1("name"), df2("name")))
+
+    // Scala, Example 6-12 — good: equality on UDF results (equi)
+    val sl = udf((s: String) => s.length())
+    df1.joinWith(df2, sl(df1("name")) === sl(df2("name")))
+    ```
+    """)
+    return
+
+
+@app.cell
+def _(df_size, df_zip):
+    from pyspark.sql.functions import udf as _udf
+    from pyspark.sql.types import BooleanType as _BT, IntegerType as _IT
+
+    _str_len = _udf(lambda s: len(s), _IT())
+
+    # Good: equality on UDF results — Spark can hash on the result
+    _good = df_size.join(df_zip, _str_len(df_size["name"]) == _str_len(df_zip["name"]))
+    print("=== good join plan (equi on UDF results) ===")
+    _good.explain()
+
+    # Bad: UDF is the predicate — forces all-to-all comparison
+    _str_len_eq = _udf(lambda a, b: len(a) == len(b), _BT())
+    _bad = df_size.join(df_zip, _str_len_eq(df_size["name"], df_zip["name"]))
+    print("=== bad join plan (UDF as predicate) ===")
+    _bad.explain()
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### 18.8. Execution operators
+
+    Spark SQL selects a physical join strategy based on data sizes, join type, join condition, and hints. Table 6-9 from the book, condensed:
+
+    | Strategy | Join types | Conditions | Performance characteristic |
+    |---|---|---|---|
+    | **Broadcast hash** | All except full outer | equi-join | Fastest when one side is small; no shuffle |
+    | **Broadcast nested loop** | All | equi and non-equi | Last resort — iterates one side repeatedly; OOM risk if broadcast side is large |
+    | **Shuffle and replicate** (cartesian) | Inner, cross | equi and non-equi | Explodes data; produces narrow dependencies |
+    | **Shuffle hash** | All | equi-join | Classic shuffle; requires one partition to fit in memory as a hash map |
+    | **Shuffle sort-merge** | All | equi-join on sortable keys | Robust default for large tables; sort + merge avoids hash-map OOM |
+
+    **Automatic broadcast** is controlled by `spark.sql.autoBroadcastJoinThreshold` (default 10 MB). When Spark's size estimates say a table is under that threshold it broadcasts automatically. You can also force a broadcast with the `broadcast()` hint regardless of size.
+
+    AQE adds a sixth strategy at runtime: it can **split skewed partitions** in shuffle hash or sort-merge joins, turning one oversized partition into several balanced ones without rerunning the entire job.
+
+    > **Tip.** Call `.explain()` to see which strategy Spark chose. Look for `BroadcastHashJoin`, `SortMergeJoin`, or `BroadcastNestedLoopJoin` in the physical plan. When the plan is wrong — for example, Spark chose sort-merge but you know one side is tiny — add a `broadcast()` hint.
+    """)
+    return
+
+
+@app.cell
+def _(df_size, df_zip):
+    import pyspark.sql.functions as _Fj
+
+    # Without a hint — with tiny DataFrames Spark will already choose broadcast,
+    # but on large tables this would default to SortMergeJoin
+    print("=== no hint ===")
+    df_size.join(df_zip, df_size["name"] == df_zip["name"]).explain()
+
+    # Explicit broadcast hint — forces BroadcastHashJoin regardless of size estimates
+    print("=== broadcast(df_zip) hint ===")
+    df_size.join(_Fj.broadcast(df_zip), df_size["name"] == df_zip["name"]).explain()
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### 18.9. joinWith
+
+    `Dataset.joinWith` is a Scala/Java-only API — it is not available on PySpark DataFrames. In Scala it returns a `Dataset[(LeftType, RightType)]` where each row is a strongly-typed tuple of both sides, preserving type information through the join.
+
+    ```scala
+    // Scala, Example 6-13
+    val result: Dataset[(RawOtter, CoffeeShop)] =
+      otters.joinWith(coffeeShops, otters("zip") === coffeeShops("zip"))
+
+    // Scala, Example 6-14 — self join: each side keeps its own namespace
+    val result: Dataset[(RawOtter, RawOtter)] =
+      otters.as("l").joinWith(otters.as("r"), $"l.zip" === $"r.zip")
+    ```
+
+    In PySpark the closest equivalent is a regular `join` with `.alias()` to prevent column-name collisions, and then selecting the desired fields using the `alias.column` dot notation — which is exactly what the self-join example in 18.6 demonstrates.
     """)
     return
 
