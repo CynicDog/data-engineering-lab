@@ -2120,5 +2120,533 @@ def _(mo):
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ---
+
+    ## 19. Narrow vs Wide Transformations
+
+    The book opens Ch. 7 with RDD internals. The same mechanics apply directly to DataFrames — Catalyst compiles your `filter`, `select`, and `join` calls into an RDD execution plan governed by the same rules.
+
+    | Category | Definition | DataFrame examples |
+    |---|---|---|
+    | **Narrow** | Each output partition depends on exactly one input partition — no data moves between partitions | `filter`, `select`, `withColumn`, `coalesce` (reducing), `mapPartitions` |
+    | **Wide** | Output partitions may depend on *many* input partitions — requires a shuffle | `groupBy().agg()`, `orderBy`, `join` (non-broadcast), `repartition`, `distinct` |
+
+    Narrow steps inside one stage share a single pass over the data. Every wide transformation is a **stage boundary**: shuffle files are written to disk, data crosses the network, and the downstream stage cannot begin until the shuffle completes.
+
+    > **Fault tolerance footnote.** Recovering a lost partition is cheap for narrow dependencies (one parent partition re-runs) and potentially very expensive for wide ones (all parent partitions may need to re-run). This is why persisting an RDD or DataFrame before a wide transformation can pay off when the upstream computation is costly.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### 19.1. Reading stages in the query plan
+
+    `df.explain()` prints the physical plan. Each `Exchange` node is a shuffle — a wide dependency boundary. Steps between two `Exchange` nodes belong to the same stage and share one data pass.
+    """)
+    return
+
+
+@app.cell
+def _(F, df_otters):
+    # --- narrow only: filter + withColumn stay in one stage (no Exchange) ---
+    _narrow_plan = df_otters.filter(F.col("name") != "Grumpy").withColumn("len", F.length("name"))
+    print("=== narrow-only plan (no Exchange) ===")
+    _narrow_plan.explain()
+
+    # --- wide: groupBy forces a shuffle (Exchange present) ---
+    _wide_plan = df_otters.groupBy("name").count()
+    print("=== wide plan (Exchange present) ===")
+    _wide_plan.explain()
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### 19.2. `coalesce` vs `repartition`
+
+    Both change partition count, but they behave very differently:
+
+    - **`coalesce(n)`** — narrow transformation. Merges existing partitions locally; no shuffle. The entire preceding stage runs at the *lower* parallelism level (Spark won't split tasks to fill more cores). Use it only when reducing partitions and you want to avoid the shuffle overhead.
+    - **`repartition(n)`** — wide transformation. Full shuffle that produces exactly *n* balanced partitions. More expensive, but lets the upstream stage run at full parallelism before the shuffle.
+
+    Rule of thumb: use `coalesce` when writing a small final output; use `repartition` when you need balanced partitions for downstream processing.
+    """)
+    return
+
+
+@app.cell
+def _(df_otters):
+    print(f"original partitions : {df_otters.rdd.getNumPartitions()}")
+
+    coalesced = df_otters.coalesce(1)
+    print(f"after coalesce(1)   : {coalesced.rdd.getNumPartitions()}")
+    print("coalesce plan (no Exchange):")
+    coalesced.explain()
+
+    repartitioned = df_otters.repartition(4)
+    print(f"after repartition(4): {repartitioned.rdd.getNumPartitions()}")
+    print("repartition plan (Exchange present):")
+    repartitioned.explain()
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 20. `mapPartitions` — the partition-level escape hatch
+
+    `mapPartitions` is a narrow transformation that hands you an iterator of rows for one partition and expects an iterator back. Because it operates at the partition level rather than the row level, it is the right hook for:
+
+    - **Per-partition setup**: creating a database connection, loading a ML model, or seeding a random number generator — once per partition instead of once per row.
+    - **Complex state within a partition**: running totals, stateful parsers, sliding windows over sorted records.
+
+    The book emphasises *iterator-to-iterator* discipline: return a generator or chained iterator rather than materialising the entire partition as a list. That lets Spark spill selectively to disk when a partition is too large for memory.
+
+    > **Python note.** The Scala book warns about object-reuse and GC pressure from creating many short-lived JVM objects. In PySpark, `mapPartitions` runs Python code via Arrow or serialisation — so the JVM GC concern mostly disappears, but keeping the partition as a lazy iterator still avoids building a large in-memory list before Spark can write any rows.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### 20.1. Per-partition setup — seeding one RNG per partition
+    """)
+    return
+
+
+@app.cell
+def _(spark):
+    import random as _random
+    from pyspark.sql.types import StructType as _ST20, StructField as _SF20, LongType as _LT20, DoubleType as _DT20
+    from pyspark.sql import Row as _Row20
+
+    _schema_sample = _ST20([
+        _SF20("id", _LT20()),
+        _SF20("sampled_score", _DT20()),
+    ])
+
+    _df_ids = spark.range(20)  # 20 rows, partitioned by default
+
+    def _sample_partition(rows):
+        rng = _random.Random()      # one RNG per partition — not per row
+        for row in rows:
+            if rng.random() < 0.5:  # 50 % sample
+                yield (row.id, rng.gauss(0, 1))
+
+    _sampled_rdd = (
+        _df_ids.rdd
+        .mapPartitions(_sample_partition)
+        .map(lambda t: _Row20(id=t[0], sampled_score=t[1]))
+    )
+    spark.createDataFrame(_sampled_rdd, schema=_schema_sample).show()
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### 20.2. Iterator-to-iterator pattern — running totals without materialising
+
+    The key discipline: never call `list(iterator)` or `len(iterator)` inside `mapPartitions`. Those traverse the iterator eagerly, loading the whole partition into memory. Instead, use generator expressions or chained iterators.
+
+    Below: for each partition, emit only rows where the running word-count exceeds a threshold. The generator processes one row at a time; Spark can spill earlier rows to disk before the later ones are even read.
+    """)
+    return
+
+
+@app.cell
+def _(spark):
+    from pyspark.sql import Row as _Row
+    from pyspark.sql.types import StructType as _ST, StructField as _SF, StringType as _StrT, IntegerType as _IntT
+
+    df_reports = spark.createDataFrame([
+        ("Alice", "happy students learn well"),
+        ("Alice", "the class was very happy today and students did great work"),
+        ("Bob",   "students struggled today"),
+        ("Bob",   "much better lesson happy to report progress now"),
+        ("Bob",   "final happy review was excellent and everyone was very happy"),
+    ], ["instructor", "text"])
+
+    def count_happy_iter(rows):
+        running = 0
+        for row in rows:                        # one row at a time — iterator stays lazy
+            words = row.text.split()
+            happy = sum(1 for w in words if w.lower() == "happy")
+            running += happy
+            yield _Row(instructor=row.instructor, text=row.text, happy_so_far=running)
+
+    schema_out = _ST([
+        _SF("instructor", _StrT()),
+        _SF("text", _StrT()),
+        _SF("happy_so_far", _IntT()),
+    ])
+
+    result_df = spark.createDataFrame(
+        df_reports.rdd.mapPartitions(count_happy_iter),
+        schema=schema_out,
+    )
+    result_df.show(truncate=False)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 21. Set Operations on DataFrames
+
+    The book covers RDD set operations and notes several gotchas around duplicates. The same behaviour carries over to DataFrame APIs.
+
+    | Operation | Behaviour | Duplicates in result |
+    |---|---|---|
+    | `union` / `unionByName` | Concatenates all rows — no deduplication | Yes — same as input |
+    | `intersect` | Keys present in both; deduplicates the result | No |
+    | `intersectAll` | Like SQL `INTERSECT ALL` — preserves duplicates | Yes |
+    | `except` / `subtract` | Keys in left that are not in right; deduplicates | No |
+    | `exceptAll` | Like SQL `EXCEPT ALL` — respects duplicate counts | Yes |
+
+    > **Warning (from the book).** Because `intersect` and `subtract` deduplicate, you cannot reconstruct the original DataFrame as `intersect.union(subtract)`. The union of those two is always a *subset* of the original when the input has duplicates or the two sides share duplicate keys.
+    """)
+    return
+
+
+@app.cell
+def _(spark):
+    from pyspark.sql import functions as _Fs
+
+    df_a = spark.createDataFrame([(1,), (2,), (3,), (4,), (4,), (4,), (4,)], ["v"])
+    df_b = spark.createDataFrame([(3,), (4,)], ["v"])
+
+    print("=== union — all rows, duplicates preserved ===")
+    df_a.union(df_b).show()
+
+    print("=== intersect — values in both, deduplicated ===")
+    df_a.intersect(df_b).show()
+
+    print("=== intersectAll — values in both, duplicate counts respected ===")
+    df_a.intersectAll(df_b).show()
+
+    print("=== subtract / except — values in a not in b, deduplicated ===")
+    df_a.subtract(df_b).show()
+
+    print("=== exceptAll — subtract respecting duplicate counts ===")
+    df_a.exceptAll(df_b).show()
+
+    # Demonstrate the reconstruction asymmetry the book warns about
+    ix = df_a.intersect(df_b)
+    sub = df_a.subtract(df_b)
+    reconstructed_count = ix.union(sub).count()
+    original_count = df_a.count()
+    print(f"original count:      {original_count}")
+    print(f"reconstructed count: {reconstructed_count}  ← smaller due to deduplication")
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 22. Broadcast Variables
+
+    A broadcast variable ships a read-only copy of a Python object to every executor *once* rather than once per task. The book motivates this for filtering large RDDs against a small lookup table.
+
+    In DataFrame work the most common form is the **broadcast join hint** (already covered in §18.8). But broadcast variables are also useful when you need a lookup dict or ML model inside a UDF — one serialised copy per executor instead of one per task invocation.
+
+    | Approach | Cost | When to use |
+    |---|---|---|
+    | Closure capture (plain variable) | Serialised with every task | Small objects, infrequent use |
+    | `spark.sparkContext.broadcast(obj)` | Serialised once per executor | Large dicts, repeated lookups across many tasks |
+    | `broadcast()` join hint | Avoids shuffle for the small side | Small DataFrame joined to a large one |
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### 22.1. Broadcasting a lookup dict inside a UDF
+    """)
+    return
+
+
+@app.cell
+def _(spark):
+    from pyspark.sql.functions import udf as _udf
+    from pyspark.sql.types import StringType as _StrT2
+
+    # Simulate a "large" external lookup table
+    zip_to_city = {
+        "94107": "San Francisco",
+        "94102": "San Francisco",
+        "94110": "San Francisco",
+        "10001": "New York",
+    }
+
+    # Broadcast it — one copy per executor, not one per task
+    bc_lookup = spark.sparkContext.broadcast(zip_to_city)
+
+    @_udf(returnType=_StrT2())
+    def lookup_city(zip_code):
+        return bc_lookup.value.get(zip_code, "Unknown")
+
+    df_zips = spark.createDataFrame(
+        [("Happy", "94107"), ("Sad", "94102"), ("Grumpy", "10001"), ("Lonely", "99999")],
+        ["name", "zip"],
+    )
+
+    df_zips.withColumn("city", lookup_city("zip")).show()
+
+    # Release when no longer needed
+    bc_lookup.unpersist()
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### 22.2. Broadcast with a non-serialisable object — transient lazy val pattern
+
+    Some objects (database connections, file handles) cannot be pickled and sent over the wire. In Scala the book uses `@transient lazy val` inside a broadcast wrapper so the object is reconstructed on the worker the first time it is needed, rather than serialised from the driver.
+
+    The Python equivalent pattern: broadcast only a lightweight config dict; reconstruct the expensive object inside the UDF using a module-level dict as a lazy cache. The cache key keeps construction to once per worker process rather than once per row.
+
+    > **Notebook caveat.** Marimo wraps each cell in an auto-named function. `functools.lru_cache` applied to a function defined *inside* a cell captures that mangled name, which cloudpickle cannot resolve in the Spark worker process. The pattern below uses an explicit `dict` cache instead — identical semantics, no name-mangling issue.
+    """)
+    return
+
+
+@app.cell
+def _(spark):
+    import random as _rand2
+    from pyspark.sql.functions import udf as _udf2
+    from pyspark.sql.types import DoubleType as _DblT2
+
+    # Broadcast just the seed — not the RNG object, which isn't picklable
+    _bc_config = spark.sparkContext.broadcast({"seed": 42})
+
+    # Module-level dict acts as the lazy cache; keyed by seed so reconstruction is once per process
+    _rng_cache: dict = {}
+
+    @_udf2(returnType=_DblT2())
+    def noisy_score(v):
+        seed = _bc_config.value["seed"]
+        if seed not in _rng_cache:
+            _rng_cache[seed] = _rand2.Random(seed)
+        return float(v) + _rng_cache[seed].gauss(0, 0.1)
+
+    spark.range(5).withColumn("noisy", noisy_score("id")).show()
+
+    _bc_config.unpersist()
+    return noisy_score
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 23. Accumulators
+
+    Accumulators are the mirror of broadcast variables: workers write, the driver reads. They are useful for collecting side-channel metrics — record counts, parse error tallies, timing — without launching a separate action.
+
+    **Caveats from the book:**
+    - Spark may re-run a task on failure or speculative execution. The accumulator will be incremented again, so counts can be inflated.
+    - Accumulators inside transformations are only guaranteed to be updated when an action forces evaluation. Calling `acc.value` before an action returns the accumulator's current (likely zero) value.
+    - For large amounts of data (long strings, big collections) use a separate action instead.
+
+    > **Best use:** process-level counters (bytes parsed, tasks completed) where double-counting on retry is acceptable. **Avoid:** business-critical counts where an exact number matters and retries are likely.
+    """)
+    return
+
+
+@app.cell
+def _(spark):
+    # Built-in accumulators: LongAccumulator, DoubleAccumulator, CollectionAccumulator
+    parse_errors = spark.sparkContext.accumulator(0)
+    rows_seen    = spark.sparkContext.accumulator(0)
+
+    df_raw = spark.createDataFrame([
+        ("94107", "3.5"),
+        ("94102", "not_a_number"),
+        ("94110", "2.1"),
+        ("bad_zip", "1.0"),
+        ("10001", "4.8"),
+    ], ["zip", "score_str"])
+
+    from pyspark.sql.types import DoubleType as _DT2
+    from pyspark.sql.functions import udf as _udf3
+
+    @_udf3(returnType=_DT2())
+    def parse_score(s):
+        rows_seen.add(1)
+        try:
+            return float(s)
+        except (ValueError, TypeError):
+            parse_errors.add(1)
+            return None
+
+    # Accumulators update only when the action runs
+    parsed = df_raw.withColumn("score", parse_score("score_str"))
+    parsed.count()   # trigger evaluation
+
+    print(f"rows seen:    {rows_seen.value}")
+    print(f"parse errors: {parse_errors.value}")
+    parsed.show()
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 24. Caching and Persistence
+
+    Spark does not cache intermediate DataFrames automatically. Each action re-executes the full lineage. Persisting materialises a DataFrame on the executors so subsequent actions can skip the recomputation.
+
+    **When caching pays off:**
+    - The same DataFrame is consumed by multiple actions or downstream stages.
+    - The transformation chain upstream is expensive (complex joins, UDFs, wide aggregations).
+    - An iterative algorithm reads the same base data many times.
+
+    **When caching hurts:**
+    - The DataFrame is used only once — caching adds write cost with no read benefit.
+    - The cluster is memory-constrained — persisted data competes with execution memory.
+    - The upstream computation is cheap (simple filter/select) — recomputing is faster than a cache read.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### 24.1. Storage levels
+
+    `cache()` is an alias for `persist()` with `MEMORY_AND_DISK` on DataFrames (note: for RDDs it defaults to `MEMORY_ONLY`). You can pass an explicit `StorageLevel`:
+
+    | Storage level | Memory | Disk | Replicas | When to use |
+    |---|---|---|---|---|
+    | `MEMORY_ONLY` | Yes | No | 1 | Fits comfortably in memory; fast access |
+    | `MEMORY_AND_DISK` | Yes | Overflow | 1 | Default; safe when size is uncertain |
+    | `MEMORY_AND_DISK_DESER` | Yes | Overflow | 1 | Same as above with explicit deserialized flag |
+    | `DISK_ONLY` | No | Yes | 1 | Recompute is more expensive than disk I/O |
+    | `MEMORY_AND_DISK_2` | Yes | Overflow | 2 | Noisy cluster; fast recovery from single node loss |
+    | `MEMORY_ONLY_2` | Yes | No | 2 | Small DataFrame; replicated for fast failover |
+    | `OFF_HEAP` | Off-heap | — | 1 | Persistent GC pressure; requires Alluxio/Tachyon |
+
+    > **PySpark 4 note.** The `_SER` / `_2_SER` variants from the book (e.g. `MEMORY_AND_DISK_SER`) no longer exist. In Python, all objects pass through pickle regardless, so the serialised/deserialised distinction from the JVM world does not map onto PySpark storage levels the same way.
+    """)
+    return
+
+
+@app.cell
+def _(spark):
+    from pyspark import StorageLevel
+    from pyspark.sql import functions as _Fc
+
+    # Simulate an expensive upstream computation
+    df_base = (
+        spark.range(10_000)
+        .withColumn("grp", (_Fc.col("id") % 10).cast("string"))
+        .withColumn("val", _Fc.randn(42))
+    )
+
+    # cache() — default MEMORY_AND_DISK
+    df_base.cache()
+    df_base.count()   # materialise
+
+    # Multiple downstream actions now skip recomputation
+    print("mean val:", df_base.agg(_Fc.mean("val")).collect()[0][0])
+    print("max val: ", df_base.agg(_Fc.max("val")).collect()[0][0])
+
+    df_base.unpersist()   # release when done
+
+    # Explicit storage level — MEMORY_AND_DISK_DESER is the closest to the book's
+    # MEMORY_AND_DISK_SER; _SER variants were removed in PySpark 4
+    df_base.persist(StorageLevel.MEMORY_AND_DISK_DESER)
+    df_base.count()
+    print("persisted (MEMORY_AND_DISK_DESER), partitions:", df_base.rdd.getNumPartitions())
+    df_base.unpersist()
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### 24.2. Multiple actions on the same DataFrame — why persist matters
+
+    Without a `cache()` call, each action re-executes the full lineage from scratch. The example below calls `count()` and then `take()` on a sorted DataFrame. Without caching, the sort runs twice.
+    """)
+    return
+
+
+@app.cell
+def _(spark):
+    from pyspark.sql import functions as _Fd
+
+    df_unsorted = spark.range(1_000).withColumn("val", _Fd.randn(0))
+
+    # --- without cache: sort runs twice ---
+    sorted_df = df_unsorted.orderBy("val")
+    n = sorted_df.count()            # sort #1
+    top10 = sorted_df.take(10)       # sort #2
+
+    # --- with cache: sort runs once ---
+    sorted_cached = df_unsorted.orderBy("val")
+    sorted_cached.cache()
+    n_c = sorted_cached.count()       # sort + cache write
+    top10_c = sorted_cached.take(10)  # reads from cache
+
+    print(f"count without cache: {n}   with cache: {n_c}")
+    print(f"first cached row: {top10_c[0]}")
+    sorted_cached.unpersist()
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### 24.3. Checkpointing
+
+    `checkpoint()` writes the DataFrame to external storage (HDFS, S3, local FS in dev) and **breaks the lineage**. After a checkpoint, Spark treats the saved files as the source — it will not re-run upstream transformations if a partition is lost.
+
+    Use checkpointing when:
+    - The lineage is so long that task serialisation itself becomes slow or the DAG overflows driver memory.
+    - You are running on a noisy cluster where executor loss mid-job is common and recomputing from scratch is prohibitive.
+    - The book's rule of thumb: *persist when jobs are slow, checkpoint when they are failing*.
+
+    > **Local checkpointing** (`localCheckpoint()`) truncates the lineage but stores data on the executor disks rather than external storage — faster, but lost if that executor dies. Not suitable for noisy clusters.
+    """)
+    return
+
+
+@app.cell
+def _(spark):
+    import tempfile as _tf, os as _os
+
+    ckpt_dir = _os.path.join(_tf.gettempdir(), "spark-ckpt-demo")
+    spark.sparkContext.setCheckpointDir(ckpt_dir)
+
+    from pyspark.sql import functions as _Fe
+
+    df_long_lineage = spark.range(500).withColumn("v", _Fe.randn(1))
+
+    # Simulate a long lineage with repeated narrow transforms
+    for _ in range(5):
+        df_long_lineage = df_long_lineage.withColumn("v", _Fe.col("v") * 1.01 + _Fe.randn(1) * 0.001)
+
+    df_long_lineage.checkpoint()          # materialise to disk, break lineage
+    print("is checkpointed:", df_long_lineage.isStreaming)  # not streaming
+
+    # After checkpoint the physical plan is much shorter
+    print("=== post-checkpoint plan ===")
+    df_long_lineage.explain()
+
+    df_long_lineage.count()
+    return
+
+
 if __name__ == "__main__":
     app.run()
+
