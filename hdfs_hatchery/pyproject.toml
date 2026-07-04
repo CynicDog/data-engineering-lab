@@ -1,0 +1,10 @@
+[project]
+name = "hdfs-hatchery"
+version = "0.1.0"
+description = "Hadoop Distributed Filesystem (HDFS) concepts, hands-on, in marimo notebooks."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "marimo[recommended]>=0.23.4",
+    "requests>=2.32.0",
+]

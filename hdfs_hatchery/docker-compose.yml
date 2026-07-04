@@ -1,0 +1,78 @@
+name: hdfs-hatchery
+
+x-hadoop-common: &hadoop-common
+  image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+  environment: &hadoop-common-env
+    CORE_CONF_fs_defaultFS: hdfs://namenode:9000
+    CORE_CONF_hadoop_http_staticuser_user: root
+    HDFS_CONF_dfs_webhdfs_enabled: "true"
+    # A tiny 1 MiB block size (instead of the 128 MiB default) means an
+    # ordinary few-MB text file already splits into several blocks, so block
+    # placement and replication are visible without needing huge files.
+    HDFS_CONF_dfs_blocksize: "1048576"
+    HDFS_CONF_dfs_replication: "3"
+    # Faster dead-datanode detection (default is ~10.5 minutes) so the
+    # kill-a-datanode demo doesn't require a coffee break: dead-node timeout
+    # is roughly 2 * recheck-interval + 10 * heartbeat-interval ≈ 30s here.
+    HDFS_CONF_dfs_heartbeat_interval: "2"
+    HDFS_CONF_dfs_namenode_heartbeat_recheck___interval: "5000"
+  networks:
+    - hdfs-net
+
+services:
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    hostname: namenode
+    container_name: hdfs-hatchery-namenode
+    environment:
+      <<: *hadoop-common-env
+      CLUSTER_NAME: hdfs-hatchery
+    ports:
+      - "9870:9870" # NameNode web UI + WebHDFS REST API
+      - "9000:9000" # NameNode RPC (fs.defaultFS)
+    volumes:
+      - namenode-data:/hadoop/dfs/name
+    networks:
+      - hdfs-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9870/dfshealth.html"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  datanode1:
+    <<: *hadoop-common
+    hostname: datanode1
+    container_name: hdfs-hatchery-datanode1
+    depends_on:
+      - namenode
+    volumes:
+      - datanode1-data:/hadoop/dfs/data
+
+  datanode2:
+    <<: *hadoop-common
+    hostname: datanode2
+    container_name: hdfs-hatchery-datanode2
+    depends_on:
+      - namenode
+    volumes:
+      - datanode2-data:/hadoop/dfs/data
+
+  datanode3:
+    <<: *hadoop-common
+    hostname: datanode3
+    container_name: hdfs-hatchery-datanode3
+    depends_on:
+      - namenode
+    volumes:
+      - datanode3-data:/hadoop/dfs/data
+
+networks:
+  hdfs-net:
+    name: hdfs-hatchery-net
+
+volumes:
+  namenode-data:
+  datanode1-data:
+  datanode2-data:
+  datanode3-data:
