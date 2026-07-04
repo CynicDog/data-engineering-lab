@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.4"
+__generated_with = "0.23.11"
 app = marimo.App(width="medium")
 
 
@@ -2442,7 +2442,7 @@ def _(spark):
     spark.range(5).withColumn("noisy", noisy_score("id")).show()
 
     _bc_config.unpersist()
-    return noisy_score
+    return
 
 
 @app.cell(hide_code=True)
@@ -2649,4 +2649,3 @@ def _(spark):
 
 if __name__ == "__main__":
     app.run()
-
